@@ -1,0 +1,382 @@
+/* Global styles for TenderAI */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Variables for design tokens */
+:root {
+  /* Navy palette */
+  --navy: #0F1C35;
+  --navy-2: #162240;
+  --navy-3: #1e2f52;
+  --navy-4: #243661;
+  
+  /* Amber palette */
+  --amber: #C4962A;
+  --amber-l: #d4a93c;
+  --amber-xl: #e8c06a;
+  --amber-soft: rgba(196,150,42,0.10);
+  --amber-glow: rgba(196,150,42,0.18);
+  
+  /* Cream palette */
+  --cream: #F5F3EE;
+  --cream-2: #EDE9E2;
+  --cream-3: #E5E0D8;
+  
+  /* Text colors */
+  --text-1: #0F1C35;
+  --text-2: #3A3530;
+  --text-3: #6B6560;
+  --text-4: #9B9590;
+  
+  /* Status colors */
+  --success: #1D9E75;
+  --success-bg: #E1F5EE;
+  --danger: #E24B4A;
+  --danger-bg: #FCEAEA;
+  --info: #378ADD;
+  --info-bg: #EEF4FB;
+  
+  /* Legacy color variables for compatibility */
+  --color-navy: #0f1c35;
+  --color-navy-light: #162240;
+  --color-navy-muted: #2a3f5e;
+  --color-amber: #c4962a;
+  --color-amber-light: #d4a93c;
+  --color-amber-soft: #faf0dc;
+  --color-cream: #f5f3ee;
+  --color-cream-dark: #ede9e2;
+  --color-cream-border: #e5e0d8;
+  --color-muted: #6b6560;
+  --color-success: #1e7c5a;
+  --color-success-bg: #e8f5ef;
+  --color-danger: #b83232;
+  --color-danger-bg: #fbeaea;
+  --color-info: #2d52a8;
+  --color-info-bg: #e8eef8;
+
+  /* Font families */
+  --font-sans: var(--font-ibm), 'IBM Plex Sans', sans-serif;
+  --font-heading: var(--font-sora), 'Sora', sans-serif;
+  --font-arabic: var(--font-arabic), 'Noto Sans Arabic', sans-serif;
+}
+
+/* Base typography */
+@layer base {
+  body {
+    @apply bg-cream font-sans text-gray-900;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading;
+  }
+}
+
+/* Component styles */
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-navy text-white rounded-md font-semibold hover:bg-navy-light transition-colors;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-amber text-navy rounded-md font-semibold hover:bg-amber-light transition-colors;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 border border-cream-border rounded-md focus:outline-none focus:ring-2 focus:ring-amber;
+  }
+
+  .card {
+    @apply bg-white rounded-lg border border-cream-border shadow-card hover:shadow-card-hover transition-shadow;
+  }
+}
+
+/* RTL Support */
+[dir='rtl'] {
+  text-align: right;
+}
+
+[dir='rtl'] .text-left {
+  text-align: right;
+}
+
+[dir='rtl'] .text-right {
+  text-align: left;
+}
+
+/* Loading skeleton */
+.skeleton {
+  @apply bg-gray-200 rounded animate-pulse;
+}
+
+/* Utility classes */
+.container {
+  @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}
+
+.transition-fast {
+  @apply transition-all duration-200;
+}
+
+.transition-smooth {
+  @apply transition-all duration-300;
+}
+
+/* Landing page animations */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-6px);
+  }
+  75% {
+    transform: translateX(6px);
+  }
+}
+
+@keyframes fadeRight {
+  from {
+    opacity: 0;
+    transform: translateX(2.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.5rem);
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(1.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeUp {
+  animation: fadeUp 0.6s ease forwards;
+}
+
+.animate-fadeRight {
+  animation: fadeRight 0.8s ease forwards;
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+/* Dashboard animations */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-color: #f3f4f6;
+  }
+  50% {
+    background-color: #e5e7eb;
+  }
+  100% {
+    background-color: #f3f4f6;
+  }
+}
+
+@keyframes fadeInStagger {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bell-shake {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  15% {
+    transform: rotate(-10deg);
+  }
+  30% {
+    transform: rotate(10deg);
+  }
+  45% {
+    transform: rotate(-6deg);
+  }
+  60% {
+    transform: rotate(6deg);
+  }
+  75% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes icon-pulse {
+  0%, 100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes icon-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes icon-bounce-vertical {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes icon-scale-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+@keyframes bar-width-animate {
+  from {
+    width: 0%;
+  }
+  to {
+    width: var(--bar-width, 100%);
+  }
+}
+
+@keyframes twinkle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes rocket-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+.skeleton-loading {
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+.animate-skeleton {
+  background: linear-gradient(
+    90deg,
+    #f3f4f6 0%,
+    #e5e7eb 50%,
+    #f3f4f6 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-fade-in-stagger {
+  animation: fadeInStagger 0.6s ease-out forwards;
+}
+
+.animate-bell-shake {
+  animation: bell-shake 500ms ease-out;
+}
+
+.animate-icon-pulse {
+  animation: icon-pulse 3s ease-in-out infinite;
+}
+
+.animate-icon-rotate {
+  animation: icon-rotate 8s linear infinite;
+}
+
+.animate-icon-bounce-vertical {
+  animation: icon-bounce-vertical 2s ease-in-out infinite;
+}
+
+.animate-icon-scale-pulse {
+  animation: icon-scale-pulse 2s ease-in-out infinite;
+}
+
+.animate-bar-width {
+  animation: bar-width-animate 700ms ease-out forwards;
+}
+
+.animate-twinkle {
+  animation: twinkle 1.5s ease-in-out infinite;
+}
+
+.animate-rocket-float {
+  animation: rocket-float 2s ease-in-out infinite;
+}

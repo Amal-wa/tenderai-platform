@@ -1,0 +1,48 @@
+# ==========================================
+# 📦 CONFIGURATION DU SCHEDULER SERVICE
+# ==========================================
+
+[tool.poetry]
+name = "scheduler-service"
+version = "0.1.0"
+description = "Service de planification indépendant pour rotation des clés et tâches périodiques"
+authors = ["AmalBk"]
+package-mode = false
+
+# ==========================================
+# 📚 DÉPENDANCES PYTHON
+# ==========================================
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Scheduling
+apscheduler = "^3.10.0"
+
+# HTTP client pour appels à l'api-gateway
+httpx = "^0.25.0"
+
+# Database (si nécessaire pour accès direct aux logs)
+sqlalchemy = "^2.0"
+psycopg = {extras = ["binary"], version = "^3.1.18"}
+
+# Configuration
+python-dotenv = "^1.0"
+pydantic = "^2.0"
+pydantic-settings = "^2.0"
+
+# Logging
+python-json-logger = "^2.0.7"
+
+# ==========================================
+# 🧪 DÉPENDANCES DE DÉVELOPPEMENT
+# ==========================================
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.23.0"
+
+# ==========================================
+# 🛠️ CONFIGURATION DE BUILD (PEP 517)
+# ==========================================
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

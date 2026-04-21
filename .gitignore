@@ -1,0 +1,62 @@
+# ─── FRONTEND (Next.js / TypeScript) ───────────────────────
+node_modules/
+.next/
+out/
+dist/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.tsbuildinfo
+next-env.d.ts
+
+# ─── BACKEND (FastAPI / Python) ────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Alembic (garder les fichiers de migration, pas le cache)
+alembic/__pycache__/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# ─── SECRETS & CONFIG SENSIBLE ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+vault-token
+vault.json
+
+# ─── LOGS & DATA ───────────────────────────────────────────
+*.log
+logs/
+*.sqlite
+*.db
+
+# ─── OS / IDE ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ─── DOCKER (si utilisé en dev) ────────────────────────────
+docker-compose.override.yml

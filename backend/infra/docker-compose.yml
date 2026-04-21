@@ -1,0 +1,151 @@
+services:
+
+  tenderai-postgres:
+    image: pgvector/pgvector:pg15
+    container_name: tenderai-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: tenderaidb
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tenderai_net
+
+  redis:
+    image: redis:7
+    container_name: tenderai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - tenderai_net
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: tenderai-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    networks:
+      - tenderai_net
+
+  tenderai-vault:
+    image: hashicorp/vault:1.20.2
+    container_name: tenderai-vault
+    command: server -dev -dev-root-token-id=dev-root-token -dev-listen-address=0.0.0.0:8200
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ../services/api-gateway/scripts:/scripts
+    networks:
+      - tenderai_net
+
+  api-gateway:
+    build: ../services/api-gateway
+    container_name: tenderai-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../services/api-gateway/.env
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_NAME: tenderai-documents
+      MINIO_SECURE: "false"
+      ED25519_PRIVATE_KEY: "MC4CAQAwBQYDK2VwBCIEILStCxjSdKjPfIlmtZdWWWPTpi3+jn5JrrF+Y6Sp/FA9"
+      ED25519_PUBLIC_KEY: "MCowBQYDK2VwAyEAlYXQlRh3OyhAAsxKeoN66UsfU0p07c+3DRSbGfkfB10="
+      ED25519_KEY_PATH: /app/keys
+      ACCESS_TOKEN_EXPIRE_MINUTES: "15"
+      REFRESH_TOKEN_EXPIRE_DAYS: "7"
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      VAULT_ADDR: http://tenderai-vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      VAULT_NAMESPACE: ""
+      VAULT_KMS_KEY_NAME: api-gateway-ed25519
+      VAULT_SECRETS_PATH: secret/data/tenderai
+      VAULT_SKIP_VERIFY: "true"
+      VAULT_KEY_ROTATION_INTERVAL_DAYS: "30"
+      USE_VAULT: "false"
+      PYTHONPATH: /app
+      TRUSTED_PROXIES: "127.0.0.1,::1,172.17.0.1"
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SCHEDULER_SECRET: ${SCHEDULER_SECRET}
+    depends_on:
+      tenderai-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - ../services/api-gateway:/app
+      - api_keys:/app/keys
+    command: sh -c "poetry run alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app"
+    networks:
+      - tenderai_net
+
+  scheduler:
+    build: ../services/scheduler
+    container_name: tenderai-scheduler
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      API_GATEWAY_URL: http://tenderai-api:8000
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      SCHEDULER_SECRET: ${SCHEDULER_SECRET}
+    depends_on:
+      tenderai-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      api-gateway:
+        condition: service_started
+    volumes:
+      - ../services/scheduler:/app
+    command: python main.py
+    networks:
+      - tenderai_net
+
+volumes:
+  pgdata:
+  miniodata:
+  api_keys:
+  redis_data:
+
+networks:
+  tenderai_net:
+    driver: bridge
