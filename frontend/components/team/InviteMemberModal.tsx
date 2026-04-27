@@ -77,10 +77,9 @@ export default function InviteMemberModal({
 
   // Countdown timer for 429 errors
   useEffect(() => {
-    if (retryCountdown > 0) {
-      const timer = setTimeout(() => setRetryCountdown(retryCountdown - 1), 1000)
-      return () => clearTimeout(timer)
-    }
+    if (retryCountdown <= 0) return
+    const timer = setTimeout(() => setRetryCountdown(retryCountdown - 1), 1000)
+    return () => clearTimeout(timer)
   }, [retryCountdown])
 
   const handleClose = (): void => {
@@ -201,7 +200,6 @@ export default function InviteMemberModal({
                     className="mt-2 w-full rounded-md border px-3 py-2 text-sm outline-none transition-colors focus:ring-2"
                     style={{
                       borderColor: errors.email ? '#E24B4A' : 'var(--color-border-tertiary, #E5E0D8)',
-                      focusRingColor: errors.email ? 'rgba(226, 75, 74, 0.2)' : 'rgba(196, 150, 42, 0.2)',
                     }}
                   />
                   {errors.email && (

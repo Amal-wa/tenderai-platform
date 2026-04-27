@@ -115,9 +115,8 @@ def _rate_limit_factory(max_attempts: int, window_minutes: int):
         FastAPI dependency function
     """
     async def _rate_limit_check(
-        request: Optional[Request] = None,
+        request: Request,
         db: Session = Depends(get_db),
-        current_user: Optional[User] = None,
     ) -> None:
         """
         Inner dependency called by FastAPI.
@@ -128,7 +127,7 @@ def _rate_limit_factory(max_attempts: int, window_minutes: int):
             HTTPException(429): If rate limit exceeded
         """
         ip_address = get_client_ip(request)
-        email = current_user.email if current_user else (request.client.host if request else "unknown")
+        email = request.client.host if request.client else "unknown"
 
         check_rate_limit(
             db=db,

@@ -65,6 +65,10 @@ PasswordResetResponse = _schemas_module.PasswordResetResponse
 UserInvitationRequest = _schemas_module.UserInvitationRequest
 AcceptInvitationRequest = _schemas_module.AcceptInvitationRequest
 AcceptInvitationResponse = _schemas_module.AcceptInvitationResponse
+AnalyseStatsResponse = _schemas_module.AnalyseStatsResponse
+AnalyseRequestSchema = _schemas_module.AnalyseRequestSchema
+AnalyseResultResponse = _schemas_module.AnalyseResultResponse
+AnalyseHistoryItemResponse = _schemas_module.AnalyseHistoryItemResponse
 
 __all__ = [
     # From schemas.py
@@ -83,6 +87,8 @@ __all__ = [
     "AdminDashboardResponse", "UserDashboardResponse",
     "PasswordResetRequest", "PasswordResetConfirm", "PasswordResetResponse",
     "UserInvitationRequest", "AcceptInvitationRequest", "AcceptInvitationResponse",
+    "AnalyseStatsResponse", "AnalyseRequestSchema", "AnalyseResultResponse",
+    "AnalyseHistoryItemResponse",
     # Translation schemas
     "TranslationRequest",
     "BulkTranslationRequest",

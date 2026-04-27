@@ -164,30 +164,14 @@ def check_permission(
         # Pas de rôle trouvé, on essaie le fallback statique
         return _check_static_permission(getattr(user, "role_name", None), permission)
 
-    permissions = role.permissions or {}
+    permissions = role.permissions or []
     role_name = role.name
 
-    # Étape 4 : Superadmin bypass
-    if permissions.get("admin") == "all" or permissions.get("*") == "*":
+    if "admin:all" in permissions or "*" in permissions:
         return True
 
-    # Étape 5 : Vérifier la permission dans le JSONB du rôle
-    module, action = permission.split(":", 1)
-    module_perms = permissions.get(module)
-
-    if module_perms is None:
-        # Module absent → fallback sur le mapping statique
-        return _check_static_permission(role_name, permission)
-
-    # Format liste : {"documents": ["read", "write"]}
-    if isinstance(module_perms, list):
-        return action in module_perms
-
-    # Format accès total : {"documents": "all"} ou {"documents": "*"}
-    if module_perms in ["all", "manage", "*"]:
+    if permission in permissions:
         return True
-
-    return False
 
 
 def _check_static_permission(role_name: Optional[str], permission: str) -> bool:

@@ -23,7 +23,6 @@ import AuthLeftPanel from '@/components/auth/AuthLeftPanel'
 import StepIndicator from '@/components/ui/StepIndicator'
 import TenderAILogo from '@/components/ui/TenderAILogo'
 import { register } from '@/lib/api'
-import { saveTokens } from '@/lib/auth'
 
 // ────────────────────────────────────────────────────────────────────────────
 // TYPES & CONSTANTS

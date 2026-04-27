@@ -137,6 +137,11 @@ services:
     volumes:
       - ../services/scheduler:/app
     command: python main.py
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
     networks:
       - tenderai_net
 

@@ -27,7 +27,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Mon tableau de bord', href: '/dashboard',        icon: LayoutDashboard },
       { label: 'Mes Appels d\'offres',href: '/dashboard/tenders',icon: FileText },
-      { label: 'Analyse IA',          href: '/dashboard/admin',  icon: BarChart2 },
+      { label: 'Analyse IA',          href: '/dashboard/analyse',icon: BarChart2 },
     ],
   },
   {
@@ -111,7 +111,9 @@ export default function Sidebar(): React.ReactElement {
             </p>
             <ul className="space-y-1">
               {section.items.map((item) => {
-                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const isActive = item.href === '/dashboard'
+                  ? pathname === item.href
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
                 return (
                   <li key={item.href}>

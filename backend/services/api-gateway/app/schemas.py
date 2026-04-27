@@ -810,3 +810,64 @@ class RegisterResponse(BaseModel):
         from_attributes = True
 
 
+# ==============================================================================
+#  ANALYSE IA (Appels d'offres Analysis)
+# ==============================================================================
+
+class AnalyseStatsResponse(BaseModel):
+    """
+    Statistiques d'analyse du mois/trimestre courant.
+    Retournée par GET /api/v1/analyse/stats.
+    """
+    total_analysed: int = Field(..., description="AOs analysés ce mois")
+    avg_conformite: int = Field(..., description="Conformité moyenne %")
+    hours_saved: int = Field(..., description="Heures économisées ce trimestre")
+    success_rate: int = Field(..., description="Taux de succès %")
+    delta_analysed: int = Field(..., description="Changement vs mois précédent")
+    delta_conformite: int = Field(..., description="Points de conformité gagnés")
+    delta_success_rate: Optional[int] = Field(None, description="Points de taux de succès gagnés vs marché")
+
+
+class AnalyseRequestSchema(BaseModel):
+    """
+    Payload pour lancer une analyse.
+    Utilisé par POST /api/v1/analyse/run.
+    """
+    tender_id: Optional[str] = Field(None, description="ID de l'appel d'offres")
+    document_url: Optional[str] = Field(None, description="URL du document pour analyse externalisée")
+    type: str = Field(..., description="conformite, technique, financier, complet")
+    lang: str = Field(..., description="FR, AR, EN")
+    scope: List[str] = Field(..., description="criteres, risques, reponse, score")
+    detail: str = Field(..., description="synthese ou approfondi")
+
+
+class AnalyseResultResponse(BaseModel):
+    """
+    Résultat d'une analyse IA.
+    Retourné par POST /api/v1/analyse/run, GET /api/v1/analyse/{id}.
+    """
+    id: str = Field(..., description="Analyse ID")
+    score_conformite: float = Field(..., description="Score de conformité 0-100")
+    score_technique: float = Field(..., description="Score technique 0-100")
+    score_risque: float = Field(..., description="Score risque 0-100")
+    resume: str = Field(..., description="Résumé de l'analyse")
+    criteres_manquants: List[str] = Field(..., description="Critères non remplis")
+    risques: List[str] = Field(..., description="Risques identifiés")
+    reponse_generee: str = Field(..., description="Réponse générée par l'IA")
+    recommandations: List[str] = Field(..., description="Recommandations")
+    created_at: str = Field(..., description="ISO timestamp")
+
+
+class AnalyseHistoryItemResponse(BaseModel):
+    """
+    Élément de l'historique des analyses.
+    Retourné par GET /api/v1/analyse/history.
+    """
+    id: str = Field(..., description="Analyse ID")
+    file_name: str = Field(..., description="Nom du fichier analysé")
+    created_at: str = Field(..., description="ISO timestamp")
+    type: str = Field(..., description="Type d'analyse")
+    score_conformite: float = Field(..., description="Score de conformité")
+    lang: str = Field(..., description="Langue FR/AR/EN")
+
+

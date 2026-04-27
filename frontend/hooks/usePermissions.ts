@@ -13,28 +13,28 @@ import {
  */
 export function usePermissions() {
   const { user } = useAuth()
-  const role = user?.role
+  const role = typeof user?.role === 'string' ? user.role : user?.role?.name ?? null
 
   return {
     /**
      * Check if user has a specific permission
      */
-    can: (permission: string): boolean => hasPermission(role || null, permission as any),
+    can: (permission: string): boolean => hasPermission(role, permission as any),
 
     /**
      * Check if user can access a module (has read permission on module)
      */
-    canAccess: (module: string): boolean => canAccessModule(role || null, module),
+    canAccess: (module: string): boolean => canAccessModule(role, module),
 
     /**
      * Check if user meets minimum role hierarchy level
      */
-    hasRole: (requiredRole: string): boolean => hasRole(role || null, requiredRole as any),
+    hasRole: (requiredRole: string): boolean => hasRole(role, requiredRole as any),
 
     /**
      * True if user has admin or superadmin role
      */
-    isAdmin: hasRole(role || null, ROLES.ADMIN),
+    isAdmin: hasRole(role, ROLES.ADMIN),
 
     /**
      * True if user is superadmin

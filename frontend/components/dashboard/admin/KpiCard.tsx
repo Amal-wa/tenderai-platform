@@ -13,7 +13,7 @@ interface KpiCardProps {
   className?: string
 }
 
-const iconMap: Record<string, React.ComponentType<{ size: number; className?: string }>> = {
+const iconMap: Record<string, React.ComponentType<any>> = {
   'Win rate': TrendingUp,
   'AOs soumis': FileText,
   'Valeur': Trophy,
@@ -32,7 +32,7 @@ const iconMap: Record<string, React.ComponentType<{ size: number; className?: st
   'NPS': Award,
 }
 
-function getIconForTitle(title: string): React.ComponentType<{ size: number; className?: string }> {
+function getIconForTitle(title: string): React.ComponentType<any> {
   for (const [key, icon] of Object.entries(iconMap)) {
     if (title.includes(key)) return icon
   }
@@ -78,7 +78,6 @@ export default function KpiCard({
   const Icon = getIconForTitle(metric.title)
   const bgClass = metric.darkVariant ? 'bg-[var(--navy)]' : 'bg-white border border-[var(--cream-3)]'
   const borderClass = metric.alertVariant ? 'border-s-[3px] border-[var(--danger)] rounded-s-none' : ''
-  const textColor = metric.darkVariant ? 'text-white' : 'text-[var(--navy)]'
 
   return (
     <motion.div

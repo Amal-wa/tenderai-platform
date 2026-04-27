@@ -44,7 +44,8 @@ from .schemas import (
     NotificationResponse, AdminDashboardResponse, UserDashboardResponse,
     ErrorResponse, PaginatedResponse,
     PasswordResetRequest, PasswordResetConfirm, PasswordResetResponse,
-    UserInvitationRequest, AcceptInvitationRequest, AcceptInvitationResponse
+    UserInvitationRequest, AcceptInvitationRequest, AcceptInvitationResponse,
+    AnalyseStatsResponse, AnalyseRequestSchema, AnalyseResultResponse, AnalyseHistoryItemResponse
 )
 from .security import (
     create_access_token, create_refresh_token,
@@ -72,6 +73,7 @@ from .routers.auth_jwks import router as auth_jwks_router
 from .routers.api_keys import router as api_keys_router
 from .routers.scheduler import router as scheduler_router
 from .routers.email import router as email_router
+from .routers.analyse import router as analyse_router
 import json
 
 # Load environment variables
@@ -192,66 +194,68 @@ def _create_tenant_roles(db: Session, tenant_id: UUID) -> None:
             "name": "superadmin",
             "description": "Propriétaire de l'organisation — accès complet",
             "permissions": [
-                "documents.read", "documents.write", "documents.delete",
-                "proposals.read", "proposals.write", "proposals.approve",
-                "compliance.read", "compliance.write",
-                "users.read", "users.write", "users.delete",
-                "settings.read", "settings.write",
-                "roles.read", "roles.write",
-                "billing.read", "billing.write"
+                "documents:read", "documents:write", "documents:delete",
+                "proposals:read", "proposals:write", "proposals:approve",
+                "compliance:read", "compliance:write",
+                "users:read", "users:write", "users:delete",
+                "settings:read", "settings:write",
+                "roles:read", "roles:write",
+                "billing:read", "billing:write",
+                "admin:all"
             ]
         },
         {
             "name": "admin",
             "description": "Administration de l'organisation",
             "permissions": [
-                "documents.read", "documents.write", "documents.delete",
-                "proposals.read", "proposals.write", "proposals.approve",
-                "compliance.read", "compliance.write",
-                "users.read", "users.write", "users.delete",
-                "settings.read", "settings.write",
-                "roles.read", "roles.write",
-                "billing.read", "billing.write"
+                "documents:read", "documents:write", "documents:delete",
+                "proposals:read", "proposals:write", "proposals:approve",
+                "compliance:read", "compliance:write",
+                "users:read", "users:write", "users:delete",
+                "settings:read", "settings:write",
+                "roles:read", "roles:write",
+                "billing:read", "billing:write",
+                "admin:all"
             ]
         },
         {
             "name": "manager",
             "description": "Gestion des appels d'offres et de l'équipe",
             "permissions": [
-                "documents.read", "documents.write",
-                "proposals.read", "proposals.write", "proposals.approve",
-                "compliance.read", "compliance.write",
-                "users.read", "users.write",
-                "settings.read", "settings.write"
+                "documents:read", "documents:write",
+                "proposals:read", "proposals:write", "proposals:approve",
+                "compliance:read", "compliance:write",
+                "users:read", "users:write",
+                "settings:read", "settings:write"
             ]
         },
         {
             "name": "analyst",
             "description": "Analyse et conformité",
             "permissions": [
-                "documents.read", "documents.write", "documents.delete",
-                "proposals.read", "proposals.write",
-                "compliance.read", "compliance.write",
-                "users.read",
-                "settings.read"
+                "documents:read", "documents:write", "documents:delete",
+                "proposals:read", "proposals:write",
+                "compliance:read", "compliance:write",
+                "users:read",
+                "settings:read"
             ]
         },
         {
             "name": "contributor",
             "description": "Contribution aux appels d'offres",
             "permissions": [
-                "documents.read", "documents.write",
-                "proposals.read", "proposals.write",
-                "compliance.read"
+                "documents:read", "documents:write",
+                "proposals:read", "proposals:write",
+                "compliance:read"
             ]
         },
         {
             "name": "viewer",
             "description": "Lecture seule",
             "permissions": [
-                "documents.read",
-                "proposals.read",
-                "compliance.read"
+                "documents:read",
+                "proposals:read",
+                "compliance:read"
             ]
         }
     ]
@@ -462,6 +466,9 @@ app.include_router(scheduler_router)
 
 # Register Email router (internal, private endpoints)
 app.include_router(email_router)
+
+# Register Analyse router (IA analysis endpoints)
+app.include_router(analyse_router)
 
 
 @app.get("/health", tags=["Health"])
@@ -712,15 +719,15 @@ async def check_email(
 
 @app.post(
     "/api/v1/auth/register",
-    response_model=RegisterResponse,
+    response_model=None,
     status_code=201,
     tags=["Auth"],
     summary="4-Step Registration Wizard — Create account, organization, and subscription"
 )
 async def register(
+    request: Request,
     register_data: RegisterRequest = Body(...),
-    db: Session = Depends(get_db),
-    request: Request = None
+    db: Session = Depends(get_db)
 ):
     """
      4-STEP REGISTRATION WIZARD ENDPOINT
@@ -927,16 +934,6 @@ async def register(
         ip_address=ip_address,
     )
     
-    # ========================================================================
-    # 6. COMMIT ALL CHANGES TO DATABASE
-    # ========================================================================
-    db.commit()
-    db.refresh(tenant)
-    db.refresh(user)
-    
-    # ========================================================================
-    # 6. AUDIT LOG
-    # ========================================================================
     log_action(
         db=db,
         user_id=user.id,
@@ -948,6 +945,13 @@ async def register(
         ip_address=ip_address,
         user_agent=user_agent,
     )
+    
+    # ========================================================================
+    # 6. COMMIT ALL CHANGES TO DATABASE
+    # ========================================================================
+    db.commit()
+    db.refresh(tenant)
+    db.refresh(user)
     
     # ========================================================================
     # 7. SEND VERIFICATION EMAIL (async, non-blocking)
@@ -1018,12 +1022,12 @@ async def register(
 
 @app.post(
     "/api/v1/auth/login",
-    response_model=TokenResponse,
+    response_model=None,
     tags=["Auth"],
     summary="Authentification — retourne les tokens JWT",
     dependencies=[Depends(RateLimitStrict)]
 )
-async def login(credentials: UserLogin = Body(...), db: Session = Depends(get_db), request: Request = None):
+async def login(request: Request, credentials: UserLogin = Body(...), db: Session = Depends(get_db)):
     """
     FEATURE 1 : Authentification JWT
     ==================================
@@ -1052,13 +1056,13 @@ async def login(credentials: UserLogin = Body(...), db: Session = Depends(get_db
     # ── Étape 0 : Vérifier le rate limit ──────────────────────────────────────
     # Rate limit enforced via dependencies=[Depends(RateLimitStrict)]
     ip_address = get_client_ip(request)
-    user_agent = request.headers.get("user-agent") if request else None
+    user_agent = request.headers.get("user-agent")
 
     # ── Vérification des credentials ──────────────────────────────────────────
     user = db.query(User).filter(User.email == credentials.email).first()
 
     if not user or not verify_password(credentials.password, user.hashed_password):
-        # ⚠️ Message générique intentionnel : on ne révèle pas si l'email existe
+        #  Message générique intentionnel : on ne révèle pas si l'email existe
         record_login_attempt(
             db=db,
             email=credentials.email,
@@ -1290,9 +1294,9 @@ async def login(credentials: UserLogin = Body(...), db: Session = Depends(get_db
     dependencies=[Depends(RateLimitEmailVerify)]
 )
 async def verify_email(
+    request: Request,
     token: str = Query(..., description="JWT token from verification email"),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """
     Valide le lien de confirmation d'email.
@@ -1490,9 +1494,9 @@ async def verify_email(
     dependencies=[Depends(RateLimitResend)]
 )
 async def resend_verification(
+    request: Request,
     body: dict = Body(..., example={"email": "user@example.com"}),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """
     Renvoie un nouveau lien de vérification d'email.
@@ -1654,17 +1658,17 @@ async def get_current_user_profile(
 
 @app.post(
     "/api/v1/auth/refresh",
-    response_model=TokenResponse,
+    response_model=None,
     tags=["Auth"],
     summary="Renouveler l'access token avec le refresh token",
     dependencies=[Depends(RateLimitRefresh)]
 )
 async def refresh_token_endpoint(
+    request: Request,
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     
-    refresh_token = request.cookies.get("refresh_token") if request else None
+    refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1677,7 +1681,8 @@ async def refresh_token_endpoint(
     # ============================================================================
 
    
-    user_agent = request.headers.get("User-Agent") if request else None
+    user_agent = request.headers.get("User-Agent")
+    ip_address = get_client_ip(request)
     
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -2204,10 +2209,10 @@ async def accept_invitation(
     summary="Déconnexion — révoque la session courante"
 )
 async def logout(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session        = Depends(get_db),
     token: str         = Depends(oauth2_scheme),
-    request: Request   = None,
 ):
     """
     
@@ -2543,8 +2548,8 @@ async def get_my_document(
     summary="Supprimer un document (soft delete avec audit)"
 )
 async def delete_my_document(
+    request: Request,
     doc_id: UUID = Path(...),
-    request: Request = None,
     delete_data: Optional[Dict[str, Any]] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -2603,7 +2608,7 @@ async def delete_my_document(
             status="failure",
             reason="Permission denied: not owner and not admin",
             ip_address=get_client_ip(request),
-            user_agent=request.headers.get("user-agent") if request else None,
+            user_agent=request.headers.get("user-agent"),
         )
         db.commit()
         
@@ -2659,7 +2664,7 @@ async def delete_my_document(
         status="success",
         reason=reason or "Document supprimé par l'utilisateur",
         ip_address=get_client_ip(request),
-        user_agent=request.headers.get("user-agent") if request else None,
+        user_agent=request.headers.get("user-agent"),
     )
     
     # ── 7. Commit ─────────────────────────────────────────────────────────
@@ -2691,11 +2696,11 @@ async def delete_my_document(
     dependencies=[Depends(RateLimitNormal)]
 )
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     reference: Optional[str] = None,
     deadline: Optional[str] = None,
     budget_eur: Optional[float] = None,
-    request: Request = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -2820,7 +2825,7 @@ async def upload_document(
         status="success",
         reason=f"Document '{new_doc.filename}' uploaded",
         ip_address=get_client_ip(request),
-        user_agent=request.headers.get("user-agent") if request else None,
+        user_agent=request.headers.get("user-agent"),
     )
     db.commit()
     
@@ -3146,11 +3151,11 @@ async def list_roles(
 
 @app.post("/api/v1/{tenant_id}/roles", response_model=RoleResponse, status_code=201, tags=["Roles"], dependencies=[Depends(RateLimitNormal)])
 async def create_role(
+    request: Request,
     tenant_id: UUID = Path(...),
     role_data: RoleCreate = None,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """Créer un nouveau rôle."""
     if current_user.tenant_id != tenant_id:
@@ -3168,7 +3173,7 @@ async def create_role(
     
    
     permissions = role_data.permissions or []
-    has_admin_perms = "admin.all" in permissions or "*" in permissions
+    has_admin_perms = "admin:all" in permissions or "*" in permissions
     if has_admin_perms:
         if not is_super_admin(current_user, db):
             raise HTTPException(
@@ -3299,11 +3304,11 @@ async def list_users(
 
 @app.post("/api/v1/{tenant_id}/users", response_model=UserResponse, status_code=201, tags=["Users"], dependencies=[Depends(RateLimitNormal)])
 async def create_user_admin(
+    request: Request,
     tenant_id: UUID = Path(...),
     user_data: UserCreate = Body(...),
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """
     Créer un utilisateur (admin uniquement).
@@ -3333,14 +3338,14 @@ async def create_user_admin(
         ).first()
         if role_obj:
             role_id = role_obj.id
-    
-   
+
+    if role_id:
         assigned_role = db.query(Role).filter(Role.id == role_id).first()
         if assigned_role:
             role_perms = assigned_role.permissions or []
             is_admin_role = (
                 (assigned_role.is_system and assigned_role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-                ("admin.all" in role_perms or "*" in role_perms)
+                ("admin:all" in role_perms or "*" in role_perms)
             )
             if is_admin_role and not is_super_admin(current_user, db):
                 raise HTTPException(
@@ -3384,7 +3389,7 @@ async def create_user_admin(
             role_perms = assigned_role.permissions or []
             is_admin_role = (
                 (assigned_role.is_system and assigned_role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-                ("admin.all" in role_perms or "*" in role_perms)
+                ("admin:all" in role_perms or "*" in role_perms)
             )
             if is_admin_role:
                 log_action(
@@ -3425,12 +3430,12 @@ async def get_user(
 
 @app.patch("/api/v1/{tenant_id}/users/{user_id}", response_model=UserResponse, tags=["Users"], dependencies=[Depends(RateLimitNormal)])
 async def update_user(
+    request: Request,
     tenant_id: UUID = Path(...),
     user_id: UUID = Path(...),
     user_data: UserUpdate = None,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """Modifier un utilisateur (admin uniquement).
     """
@@ -3487,7 +3492,7 @@ async def update_user(
             role_perms = new_role.permissions or []
             is_admin_role = (
                 (new_role.is_system and new_role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-                ("admin.all" in role_perms or "*" in role_perms)
+                ("admin:all" in role_perms or "*" in role_perms)
             )
             if is_admin_role and not is_super_admin(current_user, db):
                 raise HTTPException(
@@ -3549,7 +3554,7 @@ async def update_user(
             role_perms = new_role.permissions or []
             is_admin_role = (
                 (new_role.is_system and new_role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-                ("admin.all" in role_perms or "*" in role_perms)
+                ("admin:all" in role_perms or "*" in role_perms)
             )
             if is_admin_role:
                 log_action(
@@ -3574,11 +3579,11 @@ async def update_user(
 
 @app.delete("/api/v1/{tenant_id}/users/{user_id}", status_code=204, tags=["Users"], dependencies=[Depends(RateLimitStrict)])
 async def delete_user(
+    request: Request,
     tenant_id: UUID = Path(...),
     user_id: UUID = Path(...),
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """Supprimer un utilisateur (soft delete — admin uniquement).
     
@@ -3613,7 +3618,8 @@ async def delete_user(
         )
     ).join(Role).count()
     
-    if user.role_id and db.query(Role).filter(Role.id == user.role_id).first().name == "superadmin" and superadmin_count <= 1:
+    user_role = db.query(Role).filter(Role.id == user.role_id).first() if user.role_id else None
+    if user_role and user_role.name == "superadmin" and superadmin_count <= 1:
         raise HTTPException(
             status_code=400,
             detail="Impossible de supprimer le seul superadmin du tenant"
@@ -3696,7 +3702,7 @@ async def list_audit_logs(
     q = db.query(
         AuditLog,
         UserAlias.email.label("user_email"),
-        (UserAlias.first_name + " " + UserAlias.last_name).label("user_name")
+        UserAlias.full_name.label("user_name")
     ).outerjoin(
         UserAlias,
         and_(
@@ -3796,8 +3802,8 @@ async def get_admin_dashboard(
     is_admin = (
         (current_user.role and current_user.role.is_system and 
          current_user.role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-        ("admin.all" in user_permissions or "*" in user_permissions or
-         "roles.read" in user_permissions or "users.write" in user_permissions)
+        ("admin:all" in user_permissions or "*" in user_permissions or
+         "roles:read" in user_permissions or "users:write" in user_permissions)
     )
     if not is_admin:
         raise HTTPException(status_code=403, detail="Rôle tenant_admin requis")

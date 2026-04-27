@@ -16,6 +16,7 @@ export default function VerifyEmailPage(): JSX.Element {
   const [isResending, setIsResending] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [successMessage, setSuccessMessage] = useState<string>('')
+  const [nextStep, setNextStep] = useState<string>('/register/setup-2fa')
 
   // Auto-verify if token in URL
   useEffect(() => {
@@ -32,11 +33,13 @@ export default function VerifyEmailPage(): JSX.Element {
       const response = await api.get(`/api/v1/auth/verify-email?token=${token}`)
 
       setSuccessMessage(response.data.message || 'Votre email est maintenant vérifié!')
+      
+      const redirectPath = response.data.next_step || '/register/setup-2fa'
+      setNextStep(redirectPath)
       setStatus('success')
 
-      // Redirect to setup-2fa after 3 seconds
       setTimeout(() => {
-        router.push('/register/setup-2fa')
+        router.push(redirectPath)
       }, 3000)
     } catch (error: unknown) {
       setErrorMessage(extractErrorMessage(error))
@@ -102,7 +105,7 @@ export default function VerifyEmailPage(): JSX.Element {
                 </div>
 
                 <button
-                  onClick={() => router.push('/register/setup-2fa')}
+                  onClick={() => router.push(nextStep)}
                   className="w-full py-3.5 bg-amber text-white font-semibold rounded-xl hover:bg-amber-light transition-all flex items-center justify-center gap-2"
                 >
                   Continuer vers 2FA

@@ -81,9 +81,9 @@ def decrypt_secret(encrypted_secret: str) -> str:
 
 @router.post("/setup", response_model=TOTPSetupResponse)
 async def setup_2fa(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    request: Request = None,
 ):
     """
     Initialize 2FA setup for the current user.
@@ -176,10 +176,10 @@ async def setup_2fa(
 
 @router.post("/verify", response_model=TOTPVerifyResponse)
 async def verify_2fa(
+    http_request: Request,
     request: TOTPVerifyRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    http_request: Request = None,
 ):
     """
     Verify TOTP code and activate 2FA.
@@ -260,10 +260,10 @@ async def verify_2fa(
 
 @router.post("/disable", response_model=TOTPDisableResponse)
 async def disable_2fa(
+    http_request: Request,
     request: TOTPDisableRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    http_request: Request = None,
 ):
     """
     Disable 2FA for the current user.
@@ -374,9 +374,9 @@ class TOTPLoginResponse(BaseModel):
 
 @router.post("/login", response_model=TOTPLoginResponse)
 async def login_with_2fa(
+    http_request: Request,
     request: TOTPLoginRequest,
     db: Session = Depends(get_db),
-    http_request: Request = None,
 ):
     """
     Complete login with 2FA verification.

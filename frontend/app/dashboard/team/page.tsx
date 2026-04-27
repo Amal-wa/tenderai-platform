@@ -81,6 +81,7 @@ export default function TeamPage(): JSX.Element {
     if (user && isAdmin) {
       fetchMembers()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isAdmin])
 
   const handleInviteSuccess = (_email: string): void => {
@@ -222,7 +223,9 @@ export default function TeamPage(): JSX.Element {
                         color: 'var(--amber, #C4962A)',
                       }}
                     >
-                      {member.role || 'N/A'}
+                      {typeof member.role === 'object' && member.role !== null
+                        ? (member.role as { name: string }).name
+                        : member.role || 'N/A'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm">

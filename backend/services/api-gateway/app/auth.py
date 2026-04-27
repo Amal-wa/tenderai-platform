@@ -568,14 +568,14 @@ async def get_current_admin(
     if not role:
         raise HTTPException(status_code=403, detail="Rôle introuvable")
 
-    permissions = role.permissions or {}
+    permissions = role.permissions or []
     # Un utilisateur est admin si :
     # - Son rôle système s'appelle "admin", "superadmin", "system_admin", ou "tenant_admin"
-    # - Ou ses permissions contiennent {"*": "*"} ou {"admin": "all"}
+    # - Ou ses permissions contiennent "*" ou "admin:all"
     is_admin = (
         (role.is_system and role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-        permissions.get("*") == "*" or
-        permissions.get("admin") == "all"
+        "*" in permissions or
+        "admin:all" in permissions
     )
 
     if not is_admin:
