@@ -53,11 +53,9 @@ export default function AnalyseClient() {
   const [historyLoading, setHistoryLoading] = useState(false) // FIX: déclaré
   const [error, setError] = useState<string | null>(null)
 
-  // RBAC check
   useEffect(() => {
     if (!user) return
-    const role = typeof user.role === 'string' ? user.role : user.role?.toString?.() ?? ''
-    if (!['superadmin', 'admin', 'manager', 'analyst'].includes(role)) {
+    if (!['superadmin', 'admin', 'manager', 'analyst'].includes(user.role)) {
       router.push('/errors/403')
     }
   }, [user, router])
@@ -149,8 +147,7 @@ export default function AnalyseClient() {
     if (result?.id) await exportAnalyse(result.id)
   }
 
-  const userRole = typeof user?.role === 'string' ? user.role : user?.role?.toString?.() ?? ''
-  const canExport = !!result && ['superadmin', 'admin', 'manager', 'analyst'].includes(userRole)
+  const canExport = !!result && ['superadmin', 'admin', 'manager', 'analyst'].includes(user?.role ?? '')
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ background: '#F5F0E8' }}>

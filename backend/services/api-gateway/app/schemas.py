@@ -2,9 +2,9 @@
 # SCHEMAS.PY — Validation des données entrantes et sortantes
 # ==============================================================================
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from uuid import UUID
 
 
@@ -47,6 +47,8 @@ class TenantUpdate(BaseModel):
         None, pattern="^(free|starter|professional|enterprise)$"
     )
     is_active: Optional[bool] = None
+    sector: Optional[str] = None
+    country: Optional[str] = None
     tenant_metadata: Optional[Dict[str, Any]] = None
 
 
@@ -61,6 +63,8 @@ class TenantResponse(BaseModel):
     email: str
     subscription_plan: str
     is_active: bool
+    sector: Optional[str] = None
+    country: Optional[str] = None
     tenant_metadata: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -78,9 +82,9 @@ class RoleCreate(BaseModel):
     """Données pour créer un rôle."""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    permissions: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Permissions au format JSON. Ex: {'documents': 'read', 'users': 'none'}"
+    permissions: Union[Dict[str, Any], List[str]] = Field(
+        default_factory=list,
+        description="Permissions au format dict ou liste. Ex: {'documents': 'read'} ou ['documents.read']"
     )
 
 
@@ -88,7 +92,7 @@ class RoleUpdate(BaseModel):
     """Données pour modifier un rôle (tous les champs optionnels)."""
     name: Optional[str] = None
     description: Optional[str] = None
-    permissions: Optional[Dict[str, Any]] = None
+    permissions: Optional[Union[Dict[str, Any], List[str]]] = None
 
 
 class RoleResponse(BaseModel):
@@ -97,7 +101,7 @@ class RoleResponse(BaseModel):
     tenant_id: UUID
     name: str
     description: Optional[str]
-    permissions: Dict[str, Any]
+    permissions: Optional[Union[Dict[str, Any], List[str]]] = None
     is_system: bool  # True = rôle créé par le système (immuable). False = créé par l'admin.
     created_at: datetime
     updated_at: datetime
@@ -202,6 +206,18 @@ class UserProfileResponse(BaseModel):
         from_attributes = True
 
 
+class UserProfileUpdate(BaseModel):
+    """
+    Request pour PATCH /api/v1/auth/me
+    Modification du profil utilisateur (full_name uniquement).
+    Email ne peut être modifié ici — flow séparé nécessaire.
+    """
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Nom complet")
+
+    class Config:
+        from_attributes = True
+
+
 # ==============================================================================
 #  AUTH (Tokens & Sessions)
 # ==============================================================================
@@ -282,6 +298,30 @@ class PasswordResetResponse(BaseModel):
     """
     status: str = Field(..., description="always 'success'")
     message: str = Field(..., description="Password updated successfully")
+
+
+class ChangePasswordRequest(BaseModel):
+    """
+    Request pour POST /api/v1/auth/change-password
+    Changement de mot de passe avec vérification de l'ancien mot de passe.
+    """
+    current_password: str = Field(..., min_length=1, description="Mot de passe actuel pour vérification")
+    new_password: str = Field(..., min_length=8, max_length=128, description="Nouveau mot de passe (min 8 caractères)")
+    confirm_password: str = Field(..., min_length=8, max_length=128, description="Confirmation du nouveau mot de passe")
+
+    def validate_passwords(self) -> 'ChangePasswordRequest':
+        if self.new_password != self.confirm_password:
+            raise ValueError('Les mots de passe ne correspondent pas')
+        if self.current_password == self.new_password:
+            raise ValueError('Le nouveau mot de passe doit être différent de l\'ancien')
+        return self
+
+
+class ChangePasswordResponse(BaseModel):
+    """
+    Response pour POST /api/v1/auth/change-password
+    """
+    message: str = Field(..., description="Mot de passe modifié avec succès")
 
 
 # ==============================================================================
@@ -366,9 +406,25 @@ class AuthSessionResponse(BaseModel):
     expires_at: datetime
     revoked_at: Optional[datetime]  # None si session active, date si révoquée
     last_used_at: Optional[datetime]
+    is_current: bool = False
+
+    @field_validator('ip_address', mode='before')
+    @classmethod
+    def coerce_ip(cls, v: Any) -> Optional[str]:
+        return str(v) if v is not None else None
 
     class Config:
         from_attributes = True
+
+
+class SessionRevokeResponse(BaseModel):
+    """
+    Response pour DELETE /api/v1/auth/sessions/{session_id}
+    Confirmation de révocation d'une session.
+    """
+    message: str = Field(..., description="Session révoquée avec succès")
+    session_id: str = Field(..., description="ID de la session révoquée")
+    revoked_at: datetime = Field(..., description="Timestamp de révocation")
 
 
 class LoginAttemptResponse(BaseModel):

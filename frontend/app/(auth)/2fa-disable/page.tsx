@@ -70,14 +70,9 @@ export default function TwoFADisablePage(): JSX.Element {
         // Update AuthContext: set totp_enabled = false
         updateUserProfile({ totp_enabled: false })
         
-        // Determine role for routing
-        const roleStr = typeof userProfile.role === 'string' 
-          ? userProfile.role 
-          : userProfile.role?.name || ''
-
         // Redirect after 2 seconds
         setTimeout(() => {
-          if (['superadmin', 'admin'].includes(roleStr)) {
+          if (['superadmin', 'admin'].includes(userProfile.role)) {
             router.push('/dashboard/admin')
           } else {
             router.push('/dashboard/user')

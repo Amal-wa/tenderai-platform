@@ -51,6 +51,13 @@ class APIKeyCreateResponse(BaseModel):
     id: str
     message: str = "Copiez cette clé maintenant — elle ne sera plus affichée."
 
+
+class APIKeyRevokeResponse(BaseModel):
+    """Réponse pour DELETE /api/v1/api-keys/{key_id}"""
+    message: str = Field(..., description="Clé API révoquée avec succès")
+    key_id: str = Field(..., description="ID de la clé révoquée")
+    revoked_at: datetime = Field(..., description="Timestamp de révocation")
+
 # ==============================================================================
 # 🔌 ROUTER
 # ==============================================================================
@@ -216,7 +223,7 @@ async def list_api_keys(
 
 @router.delete(
     "/{key_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=APIKeyRevokeResponse,
     summary="Révoquer une clé API",
     description="Marque une clé comme révoquée (revoked_at = maintenant)",
 )
@@ -238,7 +245,7 @@ async def revoke_api_key(
     
     RAISES:
         404 : clé non trouvée ou appartient à un autre utilisateur
-        204 : clé révoquée avec succès
+        200 : clé révoquée avec succès
     """
     # ── REQUÊTE ─────────────────────────────────────────────────────────────
     
@@ -260,6 +267,12 @@ async def revoke_api_key(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="API key not found or doesn't belong to you",
+        )
+    
+    if api_key.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clé API déjà révoquée",
         )
     
     # ── RÉVOCATION ──────────────────────────────────────────────────────────
@@ -293,3 +306,9 @@ async def revoke_api_key(
         logger.warning(f"⚠️  Failed to log audit: {e}")
     
     logger.info(f"✅ API key revoked: {api_key.key_prefix} (user={current_user.id})")
+    
+    return APIKeyRevokeResponse(
+        message="Clé API révoquée avec succès",
+        key_id=str(api_key.id),
+        revoked_at=api_key.revoked_at
+    )

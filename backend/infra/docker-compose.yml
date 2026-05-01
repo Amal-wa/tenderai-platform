@@ -82,6 +82,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: tenderai-documents
       MINIO_SECURE: "false"
+      MINIO_PUBLIC_URL: "http://localhost:9000"
       ED25519_PRIVATE_KEY: "MC4CAQAwBQYDK2VwBCIEILStCxjSdKjPfIlmtZdWWWPTpi3+jn5JrrF+Y6Sp/FA9"
       ED25519_PUBLIC_KEY: "MCowBQYDK2VwAyEAlYXQlRh3OyhAAsxKeoN66UsfU0p07c+3DRSbGfkfB10="
       ED25519_KEY_PATH: /app/keys

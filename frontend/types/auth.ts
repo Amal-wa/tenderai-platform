@@ -6,7 +6,7 @@ export interface UserProfile {
   id: string
   email: string
   full_name: string
-  role: string | { name: string }
+  role: string | { id?: string; name: string; [key: string]: any }
   is_active: boolean
   totp_enabled: boolean
   tenant_id: string
@@ -76,6 +76,7 @@ export interface AuthContextType {
   logout: () => Promise<void>
   finalizeLogin: (redirect?: string | null) => Promise<void>
   loading: boolean
+  isLoading: boolean
   error: string | null
   setError: (error: string | null) => void
   ready: boolean

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Copy, Download, Zap, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Copy, Download, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import type { AnalyseResult } from '@/types/analyse'
 
 interface ResultPanelProps {

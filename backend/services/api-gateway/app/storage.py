@@ -24,11 +24,42 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ROOT_USER", "")            # Nom d'utilisate
 MINIO_SECRET_KEY = os.getenv("MINIO_ROOT_PASSWORD", "")      # Mot de passe MinIO
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "tenderai-documents")  # "Dossier" principal
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true" # HTTPS ou HTTP (false = HTTP)
+MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "")  # Hostname public pour le navigateur (ex: https://storage.example.com)
 
 if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
     raise RuntimeError(
         "MINIO_ROOT_USER and MINIO_ROOT_PASSWORD must be set."
     )
+
+
+def _convert_presigned_url_to_public(presigned_url: str) -> str:
+    """
+    Convertit une URL présignée interne (minio:9000) vers une URL publique.
+    
+    Si MINIO_PUBLIC_URL est configurée, remplace le hostname interne.
+    Sinon, retourne l'URL inchangée (mode local).
+    
+    Exemple:
+        Input:  http://minio:9000/tenderai-documents/logos/abc.png?X-Amz-Algorithm=...
+        Output: https://storage.example.com/tenderai-documents/logos/abc.png?X-Amz-Algorithm=...
+    """
+    if not MINIO_PUBLIC_URL:
+        return presigned_url
+    
+    from urllib.parse import urlparse, urlunparse
+    
+    parsed = urlparse(presigned_url)
+    public_parsed = urlparse(MINIO_PUBLIC_URL)
+    
+    return urlunparse((
+        public_parsed.scheme or parsed.scheme,
+        public_parsed.netloc or parsed.netloc,
+        parsed.path,
+        parsed.params,
+        parsed.query,
+        parsed.fragment,
+    ))
+
 
 class MinIOClient:
     """
@@ -165,6 +196,9 @@ class MinIOClient:
         """
         Génère une URL signée temporaire pour télécharger un fichier.
         Utile pour que le frontend puisse télécharger sans credentials.
+        
+        L'URL est automatiquement convertie à l'hostname public si MINIO_PUBLIC_URL
+        est configurée, sinon l'URL interne est retournée (mode local).
         """
         try:
             url = self.client.presigned_get_object(
@@ -172,7 +206,7 @@ class MinIOClient:
                 object_name=object_name,
                 expires=expires,
             )
-            return url
+            return _convert_presigned_url_to_public(url)
         except S3Error as e:
             logger.error(f"❌ Erreur génération URL: {e}")
             raise
@@ -235,8 +269,9 @@ class MinIOClient:
             if ext not in {'png', 'jpg', 'jpeg', 'webp', 'svg'}:
                 ext = 'png'  # Default to png if unknown
             
-            # Build object name
-            object_name = f"logos/{tenant_id}/logo.{ext}"
+            # Build object name with UUID to bypass browser cache on re-upload
+            file_uuid = str(uuid.uuid4())
+            object_name = f"logos/{tenant_id}/{file_uuid}.{ext}"
             
             # Upload to MinIO
             self.client.put_object(

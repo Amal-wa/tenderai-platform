@@ -12,7 +12,7 @@ export default function DashboardRedirect() {
       .then(res => {
         const role = !res.data.role ? 'viewer'
           : typeof res.data.role === 'string' ? res.data.role
-          : res.data.role.name ?? 'viewer'
+          : res.data.role
         if (['superadmin', 'admin'].includes(role)) {
           router.replace('/dashboard/admin')
         } else {

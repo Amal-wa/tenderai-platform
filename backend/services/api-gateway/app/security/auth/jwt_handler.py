@@ -65,7 +65,7 @@ class JWTHandler:
         self.verification_key: Any = None
         self.verification_key_previous: Optional[str] = None
 
-        logger.info(f"🔐 Initialisation JWT avec l'algorithme : {self.algorithm.value}")
+        logger.debug(f"🔐 Initialisation JWT avec l'algorithme : {self.algorithm.value}")
 
         # Charge les clés selon l'algorithme choisi
         if self.algorithm == JWTAlgorithm.EdDSA:
@@ -140,7 +140,7 @@ class JWTHandler:
                 else:
                     self.verification_key_previous = None
                 
-                logger.info(f"🔑 EdDSA keys loaded from disk: {private_key_path}")
+                logger.debug(f"🔑 EdDSA keys loaded from disk: {private_key_path}")
                 return
             except Exception as e:
                 logger.warning(f"⚠️  Failed to load keys from disk: {e}")
@@ -159,7 +159,7 @@ class JWTHandler:
                     load_pem_public_key(prev.encode()) if prev else None
                 )
                 
-                logger.info("🔑 EdDSA keys loaded from environment (legacy)")
+                logger.debug("🔑 EdDSA keys loaded from environment (legacy)")
                 # Save to disk for future use
                 self._save_eddsa_keys_to_disk()
                 return
@@ -208,7 +208,7 @@ class JWTHandler:
             f.write(public_pem)
         os.chmod(public_key_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)  # 644
         
-        logger.info(f"💾 EdDSA keys saved to disk: {private_key_path}")
+        logger.debug(f"💾 EdDSA keys saved to disk: {private_key_path}")
 
     def _generate_and_save_eddsa_keys(self) -> None:
         """
@@ -241,7 +241,7 @@ class JWTHandler:
                 with open(previous_key_path, "w") as f:
                     f.write(old_public_pem)
                 os.chmod(previous_key_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)  # 644
-                logger.info(f"💾 Previous key backed up: {previous_key_path}")
+                logger.debug(f"💾 Previous key backed up: {previous_key_path}")
             except Exception as e:
                 logger.warning(f"⚠️  Could not back up previous key: {e}")
 
@@ -285,7 +285,7 @@ class JWTHandler:
         else:
             self.verification_key_previous = None
 
-        logger.info(f"✅ New EdDSA keys generated and saved to: {private_key_path}")
+        logger.debug(f"✅ New EdDSA keys generated and saved to: {private_key_path}")
 
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ class JWTHandler:
         else:
             self.verification_key_previous = None
 
-        logger.info("✅ Clés RSA chargées avec succès")
+        logger.debug("✅ Clés RSA chargées avec succès")
 
     def _generate_and_save_rsa_keys(self) -> None:
         """
@@ -377,7 +377,7 @@ class JWTHandler:
         else:
             self.verification_key_previous = None
 
-        logger.info("✅ Nouvelles clés RSA générées et sauvegardées dans .env")
+        logger.debug("✅ Nouvelles clés RSA générées et sauvegardées dans .env")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Chargement du secret HMAC (HS256)
@@ -405,7 +405,7 @@ class JWTHandler:
         self.verification_key = secret
         self.verification_key_previous = None  # Pas de rotation pour HS256
 
-        logger.info("✅ Secret HMAC chargé avec succès")
+        logger.debug("✅ Secret HMAC chargé avec succès")
 
     def _generate_and_save_hmac_secret(self) -> None:
         """
@@ -425,7 +425,7 @@ class JWTHandler:
         self.verification_key = secret
         self.verification_key_previous = None
 
-        logger.warning(
+        logger.debug(
             f"💾 Nouveau secret HMAC écrit dans {env_file}. "
             "Sauvegardez-le dans un endroit sécurisé !"
         )
@@ -493,13 +493,13 @@ class JWTHandler:
 
         now = datetime.now(timezone.utc)
 
-        # Durées par défaut : 15 min pour access, 30 jours pour refresh
+        # Durées par défaut : 15 min pour access, 7 jours pour refresh
         if expires_delta:
             expiry = now + expires_delta
         elif token_type == "access":
             expiry = now + timedelta(minutes=15)
         else:
-            expiry = now + timedelta(days=30)
+            expiry = now + timedelta(days=7)
 
         # Ajout des claims standards
         payload.update({
@@ -510,14 +510,14 @@ class JWTHandler:
         })
 
         try:
-            logger.info(f"[KEY DEBUG] Creating {token_type} token with algorithm={self.algorithm.value}")
+            logger.debug(f"[KEY DEBUG] Creating {token_type} token with algorithm={self.algorithm.value}")
             token = jwt.encode(payload, self.signing_key, algorithm=self.algorithm.value)
             
             
             if isinstance(token, bytes):
                 token = token.decode('utf-8')
             
-            logger.info(f"[KEY DEBUG] Token created successfully (type: {type(token).__name__})")
+            logger.debug(f"[KEY DEBUG] Token created successfully (type: {type(token).__name__})")
             return token
         except Exception as e:
             logger.error(f"[KEY DEBUG] Token creation failed: {e}")
@@ -548,26 +548,26 @@ class JWTHandler:
         
         try:
             # Tentative 1 : clé courante
-            logger.info(f"[KEY DEBUG] Attempting verification with CURRENT key (algorithm={self.algorithm.value})")
+            logger.debug(f"[KEY DEBUG] Attempting verification with CURRENT key (algorithm={self.algorithm.value})")
             result = jwt.decode(token, self.verification_key, algorithms=[self.algorithm.value], options={"verify_exp": True})
-            logger.info(f"[KEY DEBUG] ✅ Token verified with CURRENT key")
+            logger.debug(f"[KEY DEBUG] ✅ Token verified with CURRENT key")
             return result
         except JWTError as e:
-            logger.warning(f"[KEY DEBUG] Current key verification failed: {str(e)[:100]}")
+            logger.debug(f"[KEY DEBUG] Current key verification failed: {str(e)[:100]}")
             # Tentative 2 : clé précédente depuis disque
             if self.verification_key_previous:
                 try:
-                    logger.warning("[KEY DEBUG] Attempting verification with PREVIOUS key from disk...")
+                    logger.debug("[KEY DEBUG] Attempting verification with PREVIOUS key from disk...")
                     payload = jwt.decode(
                         token,
                         self.verification_key_previous,
                         algorithms=[self.algorithm.value],
                         options={"verify_exp": True}
                     )
-                    logger.warning("[KEY DEBUG] ✅ Token verified with PREVIOUS key from disk")
+                    logger.debug("[KEY DEBUG] ✅ Token verified with PREVIOUS key from disk")
                     return payload
                 except JWTError as disk_err:
-                    logger.warning(f"[KEY DEBUG] Previous key (disk) verification failed: {str(disk_err)[:100]}")
+                    logger.debug(f"[KEY DEBUG] Previous key (disk) verification failed: {str(disk_err)[:100]}")
                     pass  # Clé de disque a échoué aussi → essayer Vault
             
             # Tentative 3 : clés précédentes depuis le backend (Vault ou .env)
@@ -581,17 +581,17 @@ class JWTHandler:
                         prev_public_pem = previous_keys["public_key"]
                         prev_public_key = load_pem_public_key(prev_public_pem.encode())
                         
-                        logger.warning("[KEY DEBUG] Attempting verification with PREVIOUS key from backend (Vault/Env)...")
+                        logger.debug("[KEY DEBUG] Attempting verification with PREVIOUS key from backend (Vault/Env)...")
                         payload = jwt.decode(
                             token,
                             prev_public_key,
                             algorithms=[self.algorithm.value],
                             options={"verify_exp": True}
                         )
-                        logger.warning("[KEY DEBUG] ✅ Token verified with PREVIOUS key from backend")
+                        logger.debug("[KEY DEBUG] ✅ Token verified with PREVIOUS key from backend")
                         return payload
                     except (JWTError, Exception) as backend_verify_err:
-                        logger.warning(f"[KEY DEBUG] Backend previous key verification failed: {str(backend_verify_err)[:100]}")
+                        logger.debug(f"[KEY DEBUG] Backend previous key verification failed: {str(backend_verify_err)[:100]}")
                         pass  # Clé backend a échoué aussi
             except Exception as backend_err:
                 logger.debug(f"[KEY DEBUG] Could not load previous keys from backend: {backend_err}")
@@ -642,7 +642,7 @@ def reset_jwt_handler() -> None:
     """
     global _jwt_handler
     _jwt_handler = None
-    logger.info("🔄 JWTHandler réinitialisé — sera rechargé au prochain appel")
+    logger.debug("🔄 JWTHandler réinitialisé — sera rechargé au prochain appel")
 
 
 # ── API publique (compatibilité rétrograde) ───────────────────────────────────

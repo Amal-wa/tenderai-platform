@@ -5,11 +5,13 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
 import TenderAILogo from '@/components/ui/TenderAILogo'
-import { login, getMe, extractErrorMessage } from '@/lib/api'
+import { login, extractErrorMessage } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
 import type { LoginResponse } from '@/types/auth'
 
 export default function LoginPageClient() {
   const router = useRouter()
+  const { finalizeLogin } = useAuth()
 
   // Form state
   const [showPassword, setShowPassword] = useState(false)
@@ -53,31 +55,17 @@ export default function LoginPageClient() {
 
     setIsLoading(true)
     try {
-      // POST /api/v1/auth/login
       const loginResp: LoginResponse = await login(email, password)
 
       if (loginResp.requires_2fa && loginResp.partial_token) {
-        // 2FA is required — store partial_token in sessionStorage and redirect
         sessionStorage.setItem('partial_token', loginResp.partial_token)
         router.push('/2fa-login')
       } else {
-        // No 2FA — fetch profile and redirect based on role
         try {
-          const userProfile = await getMe()
-          const role = !userProfile.role ? 'viewer'
-            : typeof userProfile.role === 'string' ? userProfile.role
-            : userProfile.role.name ?? 'viewer'
-
-          // Role-based routing (ignore redirect param)
-          if (['superadmin', 'admin'].includes(role)) {
-            router.push('/dashboard/admin')
-          } else {
-            router.push('/dashboard/user')
-          }
+          await finalizeLogin()
         } catch (err: unknown) {
-          // getMe() failed after successful login
           const errorMessage = extractErrorMessage(err)
-          console.error('[LoginPageClient] getMe() failed:', errorMessage)
+          console.error('[LoginPageClient] finalizeLogin() failed:', errorMessage)
           setError('Connexion réussie mais profil inaccessible. Rechargez la page.')
         }
       }
@@ -85,35 +73,26 @@ export default function LoginPageClient() {
       const error = err as any
       const status = error?.response?.status
 
-      // Handle network errors first
       if (!error?.response) {
         setError('Impossible de joindre le serveur. Vérifiez votre connexion.')
-      }
-      // Handle rate limiting (must be checked before 5xx)
-      else if (status === 429) {
-        // Rate limit: read unix timestamp from header
+      } else if (status === 429) {
         const resetTimestamp = parseInt(error?.response?.headers?.['x-ratelimit-reset'] || '0', 10)
         if (resetTimestamp > 0) {
-          setRateLimitReset(resetTimestamp * 1000) // Convert seconds to ms
+          setRateLimitReset(resetTimestamp * 1000)
           setLoginDisabled(true)
           const secondsRemaining = Math.max(0, Math.ceil((resetTimestamp - Date.now() / 1000)))
           setRateLimitCountdown(secondsRemaining)
-          setError(null) // Use banner instead of inline error
+          setError(null)
         } else {
           setError('Trop de tentatives. Réessayez dans quelques instants.')
         }
-      }
-      // Handle 5xx server errors (log X-Request-ID in dev)
-      else if (status && status >= 500) {
+      } else if (status && status >= 500) {
         if (process.env.NODE_ENV === 'development') {
           const requestId = error?.response?.headers?.['x-request-id']
           console.error(`[${status}] X-Request-ID: ${requestId}`)
         }
         setError('Erreur serveur. Veuillez réessayer.')
-      }
-      // ANY other response (400, 401, 403, 404, 422, etc.) → authentication failure
-      // User enumeration prevention: never reveal if email exists
-      else {
+      } else {
         setError('Nom d\'utilisateur ou mot de passe incorrect.')
       }
     } finally {

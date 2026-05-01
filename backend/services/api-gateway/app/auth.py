@@ -34,6 +34,37 @@ MAX_SESSIONS                = int(os.getenv("MAX_SESSIONS", "5"))
 # - PUBLIC : utilisé pour VÉRIFIER les tokens → peut être public
 ALGORITHM = "EdDSA"
 
+
+def normalize_permission(perm: str) -> str:
+    """
+    Normalize permission format to standard "resource:action".
+
+    Converts "resource.action" to "resource:action" by replacing
+    the first dot with a colon. Special cases:
+    - "*" remains "*" (wildcard)
+    - "tenant:*" remains "tenant:*" (already normalized)
+    - "admin.all" becomes "admin:all"
+    - "documents.read" becomes "documents:read"
+
+    Args:
+        perm: Permission string in any format
+
+    Returns:
+        Normalized permission string in "resource:action" format
+    """
+    if not perm:
+        return perm
+
+    if ":" in perm:
+        return perm
+
+    if "." in perm:
+        parts = perm.split(".", 1)
+        return f"{parts[0]}:{parts[1]}"
+
+    return perm
+
+
 def _load_or_generate_keys() -> tuple[str, str]:
     """
     Charge les clés EdDSA depuis .env ou les génère si manquantes.
@@ -546,20 +577,10 @@ async def get_current_user(
 
 
 async def get_current_admin(
-    current_user: User = Depends(get_current_user),  # Hérite de get_current_user
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> User:
-    """
-    Dépendance pour les endpoints ADMIN uniquement.
-
-    Construit sur get_current_user : d'abord on vérifie le JWT,
-    puis on vérifie en plus que l'utilisateur a un rôle admin.
-
-    Usage :
-        @app.delete("/admin/users/{id}")
-        async def delete_user(admin: User = Depends(get_current_admin)):
-            ...  # Seuls les admins arrivent ici
-    """
+    """Dépendance pour les endpoints ADMIN uniquement."""
     if not current_user.role_id:
         raise HTTPException(status_code=403, detail="Aucun rôle assigné")
 
@@ -568,17 +589,36 @@ async def get_current_admin(
     if not role:
         raise HTTPException(status_code=403, detail="Rôle introuvable")
 
-    permissions = role.permissions or []
-    # Un utilisateur est admin si :
-    # - Son rôle système s'appelle "admin", "superadmin", "system_admin", ou "tenant_admin"
-    # - Ou ses permissions contiennent "*" ou "admin:all"
-    is_admin = (
-        (role.is_system and role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-        "*" in permissions or
-        "admin:all" in permissions
-    )
+    # Vérifier d'abord si c'est un rôle admin/superadmin par le nom
+    if role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]:
+        logger.info(
+            f"Admin access granted | user={current_user.id} | role={role.name}"
+        )
+        return current_user
 
-    if not is_admin:
+    # Sinon, vérifier les permissions
+    permissions_raw = role.permissions or []
+    
+    # Handle both dict and list formats
+    if isinstance(permissions_raw, dict):
+        # For dict format {"admin": "all"} or similar
+        has_admin_permission = (
+            permissions_raw.get("admin") == "all" or
+            permissions_raw.get("*") == "*"
+        )
+    else:
+        # For list format ["admin:all", ...]
+        permissions_list = permissions_raw if isinstance(permissions_raw, list) else []
+        has_admin_permission = (
+            "*" in permissions_list or
+            "admin:all" in permissions_list
+        )
+
+    if not has_admin_permission:
+        logger.warning(
+            f"Admin check failed | user={current_user.id} | role={role.name} | "
+            f"permissions={permissions_raw}"
+        )
         raise HTTPException(status_code=403, detail="Rôle admin requis")
 
     return current_user

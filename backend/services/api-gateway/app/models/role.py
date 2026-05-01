@@ -54,11 +54,11 @@ class Role(TenantModel):  # Hérite de TenantModel → aura tenant_id, created_a
     # ==========================================================================
     
     permissions = Column(
-        JSONB,                              # Type JSON PostgreSQL (binaire, indexable)
-        nullable=False,                     # Ne peut pas être NULL
-        default={},                         # Dictionnaire vide par défaut (pas de permissions)
-        server_default="'{}'::jsonb",       # Valeur par défaut au niveau DB
-        comment="Permissions JSONB flexible: {resource: [action1, action2]}"
+        JSONB,
+        nullable=False,
+        default=[],
+        server_default="'[]'::jsonb",
+        comment="Permissions flat array: ['documents:read', 'admin:all', ...]"
     )
   
     

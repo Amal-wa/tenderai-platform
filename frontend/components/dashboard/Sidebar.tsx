@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, FileText, BarChart2,
-  Users, Bell, Settings, LogOut
+  Users, Settings, LogOut
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
@@ -34,15 +34,26 @@ const navSections: NavSection[] = [
     label: 'SYSTÈME',
     items: [
       { label: 'Équipe',         href: '/dashboard/team',          icon: Users },
-      { label: 'Notifications',  href: '/dashboard/notifications', icon: Bell,     badge: 3 },
       { label: 'Paramètres',     href: '/dashboard/settings',      icon: Settings },
     ],
   },
 ]
 
+function getAvatarInitials(fullName: string | null | undefined): string {
+  if (!fullName) return 'U'
+  const parts = fullName.trim().split(' ').filter(w => w.length > 0)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return parts[0].slice(0, 2).toUpperCase()
+}
+
+function getRoleDisplay(role: string | { id?: string; name: string; [key: string]: any } | null | undefined): string {
+  if (!role) return 'Utilisateur'
+  return typeof role === 'string' ? role : (role?.name || 'Utilisateur')
+}
+
 export default function Sidebar(): React.ReactElement {
   const pathname = usePathname()
-  const { user, logout } = useAuth()
+  const { user, isLoading, logout } = useAuth()
   const [tenant, setTenant] = useState<{ name: string; logo_url?: string } | null>(null)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
@@ -75,27 +86,31 @@ export default function Sidebar(): React.ReactElement {
             <img
               src={tenant.logo_url}
               alt={tenant.name}
-              className="h-9 w-9 object-contain rounded-xl flex-shrink-0"
+              className="h-12 w-auto max-w-[160px] object-contain rounded-lg flex-shrink-0"
             />
           ) : (
             <div className="w-9 h-9 bg-[var(--amber)] rounded-xl flex items-center justify-center flex-shrink-0">
               <span className="font-heading text-xs font-black text-white">
-                {tenant?.name?.[0]?.toUpperCase() ?? 'T'}
+                {tenant?.name
+                  ? tenant.name
+                    .trim()
+                    .split(' ')
+                    .filter((n: string) => n.length > 0)
+                    .map((n: string) => n[0])
+                    .slice(0, 2)
+                    .join('')
+                    .toUpperCase()
+                : 'T'}
               </span>
             </div>
           )}
-          <div>
-            <div className="font-heading text-[17px] font-bold text-white">
-              {tenant?.name ?? '...'}
-            </div>
-          </div>
         </div>
       </div>
 
       {/* Tenant Pill */}
       <div className="mx-4 my-3 bg-[var(--navy-3)] rounded-xl p-3 flex items-center justify-between flex-shrink-0">
         <span className="text-xs font-semibold text-white">{tenant?.name ?? '...'}</span>
-        {user?.subscription_plan && (
+        {user?.subscription_plan && !isLoading && (
           <span className="text-[10px] font-bold text-[var(--amber)] bg-[var(--amber-soft)] px-2 py-0.5 rounded-full">
             {user.subscription_plan}
           </span>
@@ -144,29 +159,34 @@ export default function Sidebar(): React.ReactElement {
 
       {/* User Section */}
       <div className="border-t border-white/[0.06] p-4 flex items-center gap-3 flex-shrink-0">
-        <div className="w-9 h-9 rounded-full bg-[var(--amber)] flex items-center justify-center flex-shrink-0">
-          <span className="text-xs font-bold text-white">
-            {user?.full_name
-              ? user.full_name
-                  .split(' ')
-                  .slice(0, 2)
-                  .map((n: string) => n[0])
-                  .join('')
-                  .toUpperCase()
-              : 'U'}
-          </span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-white truncate">
-            {user?.full_name ?? '...'}
-          </p>
-          <p className="text-[10px] text-white/40 truncate">
-            {typeof user?.role === 'string' ? user.role : user?.role?.name ?? 'Utilisateur'}
-          </p>
-        </div>
+        {isLoading ? (
+          <>
+            <div className="w-9 h-9 rounded-full bg-white/10 animate-pulse flex-shrink-0" />
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="h-3 bg-white/10 rounded animate-pulse w-20" />
+              <div className="h-2.5 bg-white/10 rounded animate-pulse w-16" />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="w-9 h-9 rounded-full bg-[var(--amber)] flex items-center justify-center flex-shrink-0">
+              <span className="text-xs font-bold text-white">
+                {getAvatarInitials(user?.full_name)}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-white truncate">
+                {user?.full_name ?? 'Utilisateur'}
+              </p>
+              <p className="text-[10px] text-white/40 truncate">
+                {getRoleDisplay(user?.role)}
+              </p>
+            </div>
+          </>
+        )}
         <button
           onClick={handleLogout}
-          disabled={isLoggingOut}
+          disabled={isLoggingOut || isLoading}
           aria-label="Se déconnecter"
           className="flex-shrink-0 p-1.5 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >

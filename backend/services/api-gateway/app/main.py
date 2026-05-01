@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 from fastapi import FastAPI, Depends, HTTPException, status, Query, Path, Request, File, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 
 from sqlalchemy.orm import Session
@@ -36,14 +36,14 @@ from .models import (
 )
 from .schemas import (
     TenantCreate, TenantResponse, TenantUpdate, RoleCreate, RoleResponse, UserCreate, UserLogin, UserResponse, UserDetailResponse,
-    UserUpdate, UserProfileResponse,
+    UserUpdate, UserProfileResponse, UserProfileUpdate,
     DocumentCreate, DocumentResponse, DocumentDeleteResponse,
     DocumentStatsResponse, ComplianceReportResponse,
-    TokenResponse, AuthSessionResponse, RegisterRequest, RegisterResponse,
+    TokenResponse, AuthSessionResponse, SessionRevokeResponse, RegisterRequest, RegisterResponse,
     AuditLogResponse,
     NotificationResponse, AdminDashboardResponse, UserDashboardResponse,
     ErrorResponse, PaginatedResponse,
-    PasswordResetRequest, PasswordResetConfirm, PasswordResetResponse,
+    PasswordResetRequest, PasswordResetConfirm, PasswordResetResponse, ChangePasswordRequest, ChangePasswordResponse,
     UserInvitationRequest, AcceptInvitationRequest, AcceptInvitationResponse,
     AnalyseStatsResponse, AnalyseRequestSchema, AnalyseResultResponse, AnalyseHistoryItemResponse
 )
@@ -66,7 +66,11 @@ from .core.dependencies import (
     RateLimitStrict, RateLimitNormal, RateLimitRefresh, 
     RateLimitEmailVerify, RateLimitResend
 )
-from .core.middleware import SecurityHeadersMiddleware, RBACMiddleware, TenantContextMiddleware, ensure_tenant_context
+from .core.middleware import (
+    SecurityHeadersMiddleware, RBACMiddleware, TenantContextMiddleware,
+    RequestIdMiddleware, LoggingMiddleware, JWTAuthMiddleware,
+    SSRFGuardMiddleware, ensure_tenant_context
+)
 from .core.permissions import is_super_admin
 from .routers.totp import router as totp_router
 from .routers.auth_jwks import router as auth_jwks_router
@@ -945,7 +949,9 @@ async def register(
         ip_address=ip_address,
         user_agent=user_agent,
     )
-    
+
+    user.last_login_at = datetime.now(timezone.utc)
+
     # ========================================================================
     # 6. COMMIT ALL CHANGES TO DATABASE
     # ========================================================================
@@ -1129,8 +1135,6 @@ async def login(request: Request, credentials: UserLogin = Body(...), db: Sessio
             expires_delta=timedelta(minutes=5),
         )
         
-        # Register partial_token JTI in auth_sessions for revocation tracking
-        import jwt as _jwt
         pp = _jwt.decode(partial_token, options={"verify_signature": False})
         auth_session = AuthSession(
             user_id=user.id,
@@ -1651,6 +1655,74 @@ async def get_current_user_profile(
         created_at=current_user.created_at,
         tenant_id=current_user.tenant_id,
         tenant_name=tenant.name,                    
+        subscription_plan=tenant.subscription_plan,
+        tenant_color=meta.get("color"),
+        totp_enabled=totp_enabled,
+    )
+
+
+@app.patch(
+    "/api/v1/auth/me",
+    response_model=UserProfileResponse,
+    tags=["Auth"],
+    summary="Modifier le profil utilisateur"
+)
+async def update_user_profile(
+    update_data: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Modifie le profil de l'utilisateur connecté (full_name uniquement).
+    Email ne peut être modifié ici — flow séparé nécessaire.
+    """
+    if update_data.full_name is not None:
+        current_user.full_name = update_data.full_name
+
+    current_user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(current_user)
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant introuvable")
+
+    role_name = None
+    if current_user.role_id:
+        role_obj = db.query(Role).filter(Role.id == current_user.role_id).first()
+        role_name = role_obj.name if role_obj else None
+
+    user_totp = db.query(UserTOTP).filter(
+        UserTOTP.user_id == current_user.id,
+        UserTOTP.is_enabled,
+    ).first()
+    totp_enabled = user_totp is not None
+
+    meta = tenant.tenant_metadata or {}
+
+    log_action(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        action="user.profile_updated",
+        resource_type="user",
+        resource_id=current_user.id,
+        new_value={"full_name": current_user.full_name},
+        status="success",
+        ip_address=get_client_ip(None),
+        user_agent=None,
+    )
+
+    return UserProfileResponse(
+        id=current_user.id,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        role=role_name,
+        is_active=current_user.is_active,
+        last_login_at=current_user.last_login_at,
+        created_at=current_user.created_at,
+        tenant_id=current_user.tenant_id,
+        tenant_name=tenant.name,
         subscription_plan=tenant.subscription_plan,
         tenant_color=meta.get("color"),
         totp_enabled=totp_enabled,
@@ -2271,6 +2343,75 @@ async def logout(
     delete_auth_cookies(response)
 
     return response
+
+
+@app.post(
+    "/api/v1/auth/change-password",
+    response_model=ChangePasswordResponse,
+    tags=["Auth"],
+    summary="Changer le mot de passe",
+    status_code=status.HTTP_200_OK,
+)
+async def change_password(
+    request: Request,
+    change_request: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Change the password of the current user with verification of the old password.
+    Revokes all other sessions for security.
+    """
+    if change_request.new_password != change_request.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Les mots de passe ne correspondent pas"
+        )
+
+    if change_request.current_password == change_request.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le nouveau mot de passe doit être différent de l'ancien"
+        )
+
+    if not verify_password(change_request.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mot de passe actuel incorrect"
+        )
+
+    current_user.hashed_password = get_password_hash(change_request.new_password)
+    current_user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    sessions_to_revoke = db.query(AuthSession).filter(
+        and_(
+            AuthSession.user_id == current_user.id,
+            AuthSession.revoked_at.is_(None),
+            AuthSession.expires_at > datetime.now(timezone.utc),
+        )
+    ).all()
+
+    for session in sessions_to_revoke:
+        session.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+
+    log_action(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        action="auth.password_changed",
+        resource_type="user",
+        resource_id=current_user.id,
+        status="success",
+        reason="Password changed — all other sessions revoked",
+        ip_address=get_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    return ChangePasswordResponse(
+        message="Mot de passe modifié avec succès"
+    )
 
 
 # ==============================================================================
@@ -2963,7 +3104,14 @@ async def get_current_tenant(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    return TenantResponse.model_validate(tenant)
+    metadata = dict(tenant.tenant_metadata or {})
+    if metadata.get("logo_path"):
+        # Return API proxy URL instead of MinIO presigned URL (avoids CORS issues)
+        metadata["logo_url"] = "/api/v1/me/tenant/logo/image"
+    
+    tenant_dict = TenantResponse.model_validate(tenant).model_dump()
+    tenant_dict["tenant_metadata"] = metadata
+    return tenant_dict
 
 
 @app.patch("/api/v1/me/tenant", response_model=TenantResponse, tags=["Tenant Settings"])
@@ -3006,6 +3154,12 @@ async def update_current_tenant(
         if existing:
             raise HTTPException(status_code=400, detail="Email already in use")
         tenant.email = tenant_data.email
+    
+    if tenant_data.sector is not None:
+        tenant.sector = tenant_data.sector
+    
+    if tenant_data.country is not None:
+        tenant.country = tenant_data.country
     
     if tenant_data.tenant_metadata is not None:
         # Merge new metadata with existing (don't overwrite logo_url/logo_path)
@@ -3075,23 +3229,18 @@ async def upload_tenant_logo(
             tenant_id=str(current_user.tenant_id)
         )
         
-        # Get presigned URL (7 days validity)
-        presigned_url = minio_client.get_presigned_url(
-            object_name=upload_result["storage_path"],
-            expires=timedelta(days=7)
-        )
-        
-        # Update tenant metadata with logo URLs
         tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         tenant.tenant_metadata = {
             **tenant.tenant_metadata,
-            "logo_url": presigned_url,
             "logo_path": upload_result["storage_path"]
         }
         db.commit()
+        
+        # Use API proxy URL instead of MinIO presigned URL (avoids CORS issues)
+        logo_url = "/api/v1/me/tenant/logo/image"
         
         # Log action
         log_action(
@@ -3110,7 +3259,7 @@ async def upload_tenant_logo(
         )
         
         return {
-            "logo_url": presigned_url,
+            "logo_url": logo_url,
             "message": "Logo mis à jour"
         }
         
@@ -3120,6 +3269,64 @@ async def upload_tenant_logo(
     except Exception as e:
         logger.error(f"❌ Error uploading logo: {e}")
         raise HTTPException(status_code=500, detail="Error uploading logo")
+
+
+@app.get("/api/v1/me/tenant/logo/image", tags=["Tenant Settings"])
+async def get_tenant_logo_image(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Serve tenant logo image directly through API (avoids CORS issues with MinIO).
+    Returns the image binary with proper Content-Type header.
+    """
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        logo_path = tenant.tenant_metadata.get("logo_path") if tenant.tenant_metadata else None
+        if not logo_path:
+            raise HTTPException(status_code=404, detail="No logo uploaded")
+        
+        try:
+            response = minio_client.client.get_object(
+                bucket_name=minio_client.bucket_name,
+                object_name=logo_path
+            )
+            
+            # Read image data
+            image_data = response.read()
+            response.close()
+            
+            # Determine content type from file extension
+            if logo_path.endswith('.png'):
+                content_type = "image/png"
+            elif logo_path.endswith('.webp'):
+                content_type = "image/webp"
+            elif logo_path.endswith('.svg'):
+                content_type = "image/svg+xml"
+            else:
+                content_type = "image/jpeg"
+            
+            return StreamingResponse(
+                BytesIO(image_data),
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f"inline; filename={logo_path.split('/')[-1]}",
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+        except Exception as e:
+            logger.error(f"❌ Error retrieving logo from MinIO: {e}")
+            raise HTTPException(status_code=500, detail="Error retrieving logo")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error serving logo: {e}")
+        raise HTTPException(status_code=500, detail="Error serving logo")
 
 
 # ==============================================================================
@@ -3800,10 +4007,8 @@ async def get_admin_dashboard(
     
     user_permissions = current_user.role.permissions or [] if current_user.role else []
     is_admin = (
-        (current_user.role and current_user.role.is_system and 
-         current_user.role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
-        ("admin:all" in user_permissions or "*" in user_permissions or
-         "roles:read" in user_permissions or "users:write" in user_permissions)
+        (current_user.role and current_user.role.name in ["admin", "superadmin", "system_admin", "tenant_admin"]) or
+        ("admin:all" in user_permissions or "*" in user_permissions )
     )
     if not is_admin:
         raise HTTPException(status_code=403, detail="Rôle tenant_admin requis")
@@ -4115,39 +4320,91 @@ async def mark_all_notifications_read(
 @app.get("/api/v1/auth/sessions", response_model=List[AuthSessionResponse], tags=["Auth"])
 async def list_sessions(
     current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
     """Liste toutes les sessions actives de l'utilisateur (tous ses appareils)."""
+    try:
+        payload = verify_token(token)
+        current_jti = payload.get("jti")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token invalide")
+    
     sessions = db.query(AuthSession).filter(
         and_(
             AuthSession.user_id == current_user.id,
             AuthSession.revoked_at == None,  # noqa: E711
             AuthSession.expires_at > datetime.now(timezone.utc),
         )
-    ).all()
-    
+    ).order_by(desc(AuthSession.created_at)).all()
     
     for session in sessions:
         session.ensure_timezone_aware()
     
-    return [AuthSessionResponse.model_validate(s) for s in sessions]
+    response_sessions = []
+    for session in sessions:
+        session_response = AuthSessionResponse.model_validate(session)
+        session_response.is_current = (session.jti == current_jti)
+        response_sessions.append(session_response)
+    
+    return response_sessions
 
 
-@app.delete("/api/v1/auth/sessions/{session_id}", status_code=204, tags=["Auth"])
+@app.delete("/api/v1/auth/sessions/{session_id}", response_model=SessionRevokeResponse, tags=["Auth"])
 async def revoke_session(
+    request: Request,
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
 ):
-    """Révoque une session spécifique (logout d'un appareil précis)."""
+    """
+    Revoke a specific session (logout from a specific device).
+    Cannot revoke the current session — use /auth/logout for that.
+    """
+    try:
+        payload = verify_token(token)
+        current_jti = payload.get("jti")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token invalide")
+
     session = db.query(AuthSession).filter(
         and_(AuthSession.id == session_id, AuthSession.user_id == current_user.id)
     ).first()
+
     if not session:
         raise HTTPException(status_code=404, detail="Session non trouvée")
+
+    if session.revoked_at is not None:
+        raise HTTPException(status_code=400, detail="Session déjà révoquée")
+
+    if current_jti and session.jti == UUID(current_jti):
+        raise HTTPException(
+            status_code=400,
+            detail="Utilisez /auth/logout pour déconnecter la session courante"
+        )
+
     session.revoked_at = datetime.now(timezone.utc)
     db.commit()
-    return None
+
+    log_action(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        action="session.revoked",
+        resource_type="auth",
+        resource_id=session.id,
+        status="success",
+        reason="User revoked session from another device",
+        ip_address=get_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    return SessionRevokeResponse(
+        message="Session révoquée avec succès",
+        session_id=str(session.id),
+        revoked_at=session.revoked_at
+    )
 
 
 # ==============================================================================

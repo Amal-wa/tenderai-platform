@@ -38,6 +38,7 @@ UserResponse = _schemas_module.UserResponse
 UserDetailResponse = _schemas_module.UserDetailResponse
 UserUpdate = _schemas_module.UserUpdate
 UserProfileResponse = _schemas_module.UserProfileResponse
+UserProfileUpdate = _schemas_module.UserProfileUpdate
 DocumentCreate = _schemas_module.DocumentCreate
 DocumentResponse = _schemas_module.DocumentResponse
 DocumentDeleteResponse = _schemas_module.DocumentDeleteResponse
@@ -62,6 +63,9 @@ UserDashboardResponse = _schemas_module.UserDashboardResponse
 PasswordResetRequest = _schemas_module.PasswordResetRequest
 PasswordResetConfirm = _schemas_module.PasswordResetConfirm
 PasswordResetResponse = _schemas_module.PasswordResetResponse
+ChangePasswordRequest = _schemas_module.ChangePasswordRequest
+ChangePasswordResponse = _schemas_module.ChangePasswordResponse
+SessionRevokeResponse = _schemas_module.SessionRevokeResponse
 UserInvitationRequest = _schemas_module.UserInvitationRequest
 AcceptInvitationRequest = _schemas_module.AcceptInvitationRequest
 AcceptInvitationResponse = _schemas_module.AcceptInvitationResponse
@@ -71,25 +75,25 @@ AnalyseResultResponse = _schemas_module.AnalyseResultResponse
 AnalyseHistoryItemResponse = _schemas_module.AnalyseHistoryItemResponse
 
 __all__ = [
-    # From schemas.py
     "TenantCreate", "TenantResponse", "TenantUpdate",
     "RoleCreate", "RoleResponse", "RoleUpdate",
     "UserCreate", "UserLogin", "UserResponse", "UserDetailResponse",
-    "UserUpdate", "UserProfileResponse",
+    "UserUpdate", "UserProfileResponse", "UserProfileUpdate",
     "DocumentCreate", "DocumentResponse", "DocumentDeleteResponse",
     "DocumentStatsResponse", "ComplianceReportResponse",
     "TokenResponse", "AuthSessionResponse", "LoginAttemptResponse",
     "RefreshRequest",
     "NotificationResponse",
+    "KPIData", "TeamActivityItem", "StatusDistribution",
     "AuditLogResponse",
     "ErrorResponse", "PaginatedResponse", "DashboardResponse",
     "RegisterRequest", "RegisterResponse",
     "AdminDashboardResponse", "UserDashboardResponse",
     "PasswordResetRequest", "PasswordResetConfirm", "PasswordResetResponse",
+    "ChangePasswordRequest", "ChangePasswordResponse", "SessionRevokeResponse",
     "UserInvitationRequest", "AcceptInvitationRequest", "AcceptInvitationResponse",
     "AnalyseStatsResponse", "AnalyseRequestSchema", "AnalyseResultResponse",
     "AnalyseHistoryItemResponse",
-    # Translation schemas
     "TranslationRequest",
     "BulkTranslationRequest",
     "TranslationResponse",

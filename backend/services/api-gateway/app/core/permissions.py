@@ -167,7 +167,7 @@ def check_permission(
     permissions = role.permissions or []
     role_name = role.name
 
-    if "admin:all" in permissions or "*" in permissions:
+    if "admin.all" in permissions or "*" in permissions:
         return True
 
     if permission in permissions:
@@ -223,4 +223,4 @@ def is_super_admin(user, db: Optional[Session] = None) -> bool:
 
     
     """
-    return check_permission(user, "admin:all", db)
+    return check_permission(user, "admin.all", db)

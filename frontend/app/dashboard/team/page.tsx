@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { Users, Plus } from 'lucide-react'
-import { useAuth } from '@/context/AuthContext'
 import { extractErrorMessage } from '@/lib/api'
+import { useAdminAccess } from '@/hooks/useAdminAccess'
 import InviteMemberModal from '@/components/team/InviteMemberModal'
 
 interface TeamMember {
@@ -17,17 +17,18 @@ interface TeamMember {
 }
 
 export default function TeamPage(): JSX.Element {
-  const authContext = useAuth()
-  const user = authContext?.user || null
+  const { isLoading, user, isAdmin } = useAdminAccess()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+   useEffect(() => {
+    if (user?.tenant_id && isAdmin) {
+      fetchMembers()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.tenant_id, isAdmin])
 
-  // Check if user is admin
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin'
-
-  // Fetch team members on component mount and after successful invitation
   const fetchMembers = async (): Promise<void> => {
     try {
       setLoading(true)
@@ -39,14 +40,12 @@ export default function TeamPage(): JSX.Element {
         return
       }
 
-      // Dynamic import to ensure api is available
       const apiInstance = (await import('@/lib/api')).default
-      
+
       if (!apiInstance) {
         throw new Error('API not available')
       }
 
-      // Call GET /api/v1/{tenant_id}/users to fetch team members
       const response = await apiInstance.get(`/api/v1/${user.tenant_id}/users`)
       const data = response?.data
 
@@ -55,7 +54,6 @@ export default function TeamPage(): JSX.Element {
         return
       }
 
-      // Handle different response structures
       if (Array.isArray(data?.items)) {
         setMembers(data.items)
       } else if (Array.isArray(data?.users)) {
@@ -77,18 +75,47 @@ export default function TeamPage(): JSX.Element {
     }
   }
 
-  useEffect(() => {
-    if (user && isAdmin) {
-      fetchMembers()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin])
-
-  const handleInviteSuccess = (_email: string): void => {
-    // Refresh members list after successful invitation
-    fetchMembers()
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600" />
+          <p className="mt-4 text-sm text-gray-600">Chargement de vos données...</p>
+        </div>
+      </div>
+    )
   }
 
+  // After loading, if user is not set, show error
+  if (!user) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div
+          className="rounded-lg border p-6 text-center"
+          style={{
+            backgroundColor: 'var(--color-background-primary, #F5F3EE)',
+            borderColor: 'var(--color-border-tertiary, #E5E0D8)',
+          }}
+        >
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--navy, #0F1C35)' }}>
+            Erreur de chargement
+          </h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Une erreur est survenue lors de l'authentification. Veuillez réessayer.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 rounded text-white text-sm"
+            style={{ backgroundColor: 'var(--navy, #0F1C35)' }}
+          >
+            Rafraîchir
+          </button>
+        </div>
+      </div>
+    )
+  }
+  
+  // Check if admin
   if (!isAdmin) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -110,9 +137,14 @@ export default function TeamPage(): JSX.Element {
     )
   }
 
+ 
+
+  const handleInviteSuccess = (_email: string): void => {
+    fetchMembers()
+  }
+
   return (
     <div className="flex-1 space-y-6 p-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-heading font-semibold" style={{ color: 'var(--navy, #0F1C35)' }}>
@@ -124,7 +156,6 @@ export default function TeamPage(): JSX.Element {
           </p>
         </div>
 
-        {/* Invite Button */}
         <button
           onClick={() => setIsModalOpen(true)}
           className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
@@ -138,7 +169,6 @@ export default function TeamPage(): JSX.Element {
         </button>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="rounded-md border p-4" style={{ borderColor: '#E24B4A', backgroundColor: '#FCEAEA' }}>
           <p className="text-sm font-medium" style={{ color: '#E24B4A' }}>
@@ -154,7 +184,6 @@ export default function TeamPage(): JSX.Element {
         </div>
       )}
 
-      {/* Members Table or Empty State */}
       {loading ? (
         <div className="rounded-lg border" style={{ borderColor: 'var(--color-border-tertiary, #E5E0D8)' }}>
           <div className="flex items-center justify-center p-12">

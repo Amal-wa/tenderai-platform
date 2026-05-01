@@ -13,7 +13,7 @@ import {
  */
 export function usePermissions() {
   const { user } = useAuth()
-  const role = typeof user?.role === 'string' ? user.role : user?.role?.name ?? null
+  const role = user?.role ?? null
 
   return {
     /**

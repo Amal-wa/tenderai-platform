@@ -5,14 +5,16 @@ import { useRouter } from 'next/navigation'
 import AuthLeftPanel from '@/components/auth/AuthLeftPanel'
 import OTPInput from '@/components/ui/OTPInput'
 import TOTPTimer from '@/components/ui/TOTPTimer'
-import { extractErrorMessage, getMe } from '@/lib/api'
+import { extractErrorMessage } from '@/lib/api'
 import { verify2FA } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
 import type { Verify2FARequest } from '@/types/auth'
 
 type Method = 'totp' | 'backup'
 
 export default function TwoFALoginPage(): JSX.Element {
   const router = useRouter()
+  const { finalizeLogin } = useAuth()
 
   // Get partial_token from sessionStorage (passed from login page)
   const [partialToken, setPartialToken] = useState<string | null>(null)
@@ -104,15 +106,7 @@ export default function TwoFALoginPage(): JSX.Element {
       // Success: tokens are now in httpOnly cookies
       // Clear sessionStorage and fetch user profile to get role
       sessionStorage.removeItem('partial_token')
-      const userProfile = await getMe()
-      const roleStr = typeof userProfile.role === 'string' ? userProfile.role : userProfile.role.name
-
-      // Route based on role
-      if (['superadmin', 'admin'].includes(roleStr)) {
-        router.push('/dashboard/admin')
-      } else {
-        router.push('/dashboard/user')
-      }
+      await finalizeLogin()
     } catch (err: unknown) {
       const newAttemptCount = attemptCount + 1
       setAttemptCount(newAttemptCount)
@@ -160,15 +154,7 @@ export default function TwoFALoginPage(): JSX.Element {
       // Success: tokens are now in httpOnly cookies
       // Clear sessionStorage and fetch user profile to get role
       sessionStorage.removeItem('partial_token')
-      const userProfile = await getMe()
-      const roleStr = typeof userProfile.role === 'string' ? userProfile.role : userProfile.role.name
-
-      // Route based on role
-      if (['superadmin', 'admin'].includes(roleStr)) {
-        router.push('/dashboard/admin')
-      } else {
-        router.push('/dashboard/user')
-      }
+      await finalizeLogin()
     } catch (err: unknown) {
       const newAttemptCount = attemptCount + 1
       setAttemptCount(newAttemptCount)
