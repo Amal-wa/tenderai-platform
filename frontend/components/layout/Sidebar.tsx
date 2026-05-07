@@ -83,7 +83,7 @@ export default function Sidebar() {
   const tenantName = tenantInfo?.name || 'Tenant'
   
   // Check if current user is admin or superadmin
-  const userRole = user?.role
+  const userRole = typeof user?.role === 'string' ? user?.role : user?.role?.name
   const canUploadLogo = userRole === 'admin' || userRole === 'superadmin' || userRole === 'tenant_admin'
 
   // Handle logo file selection

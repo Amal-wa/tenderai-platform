@@ -1,0 +1,94 @@
+/**
+ * Styles optionnels pour le dashboard audit log
+ * 
+ * Ces styles sont optionnels car Tailwind CSS couvre 99% des besoins.
+ * Utile seulement pour des customisations avancées.
+ */
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spinAlt {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.audit-table-row {
+  @apply border-b border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors;
+}
+
+.audit-badge {
+  @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border;
+}
+
+.audit-detail-panel {
+  animation: slideInFromRight 0.3s ease-out;
+}
+
+.audit-stat-card {
+  @apply bg-white border border-gray-200 rounded-lg p-4 flex items-start justify-between;
+}
+
+.audit-search-input {
+  @apply w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent;
+}
+
+.audit-pagination-btn {
+  @apply w-7 h-7 flex items-center justify-center rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.audit-pagination-btn.active {
+  @apply bg-gray-900 text-white border-gray-900;
+}
+
+/* Dark mode (optionnel) */
+@media (prefers-color-scheme: dark) {
+  .audit-table-row {
+    @apply border-b border-gray-700 hover:bg-gray-900;
+  }
+
+  .audit-stat-card {
+    @apply bg-gray-900 border-gray-700;
+  }
+
+  .audit-search-input {
+    @apply bg-gray-900 border-gray-700 text-white;
+  }
+}
+
+/* Print styles */
+@media print {
+  .audit-detail-panel,
+  .audit-pagination,
+  .audit-search-input {
+    display: none !important;
+  }
+
+  .audit-table-row {
+    page-break-inside: avoid;
+  }
+}

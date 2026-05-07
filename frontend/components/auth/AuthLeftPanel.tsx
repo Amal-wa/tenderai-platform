@@ -59,7 +59,7 @@ export default function AuthLeftPanel({
           <p className="text-white/60 text-sm leading-relaxed">{displaySubtext}</p>
         </div>
 
-        {/* Warning Box (for 2fa-disable) */}
+        {/* Warning Box */}
         {warning && (
           <div
             className={`p-4 rounded-lg border flex gap-3 ${

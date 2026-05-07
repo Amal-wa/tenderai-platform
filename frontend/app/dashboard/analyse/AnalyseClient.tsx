@@ -55,7 +55,8 @@ export default function AnalyseClient() {
 
   useEffect(() => {
     if (!user) return
-    if (!['superadmin', 'admin', 'manager', 'analyst'].includes(user.role)) {
+    const userRole = typeof user.role === 'string' ? user.role : user.role?.name
+    if (!['superadmin', 'admin', 'manager', 'analyst'].includes(userRole || '')) {
       router.push('/errors/403')
     }
   }, [user, router])
@@ -147,7 +148,8 @@ export default function AnalyseClient() {
     if (result?.id) await exportAnalyse(result.id)
   }
 
-  const canExport = !!result && ['superadmin', 'admin', 'manager', 'analyst'].includes(user?.role ?? '')
+  const userRole = typeof user?.role === 'string' ? user.role : user?.role?.name
+  const canExport = !!result && ['superadmin', 'admin', 'manager', 'analyst'].includes(userRole ?? '')
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ background: '#F5F0E8' }}>

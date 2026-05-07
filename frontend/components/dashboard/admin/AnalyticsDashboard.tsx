@@ -1,11 +1,9 @@
 'use client'
 import { motion } from 'framer-motion'
-import { getAnalyticsData } from '@/lib/admin/analytics'
 import Topbar from '@/components/dashboard/Topbar'
 import HeroBanner from './HeroBanner'
 import KpiCard from './KpiCard'
 import SectionHeader from './SectionHeader'
-import SectorChart from './SectorChart'
 import type { AdminDashboardResponse } from '@/types/dashboard'
 import type { HeroData, KpiMetric } from '@/lib/admin/analytics'
 import { Clock, AlertCircle } from 'lucide-react'
@@ -122,27 +120,27 @@ function TeamActivitySection({ activities }: { activities: AdminDashboardRespons
 export default function AnalyticsDashboard(props: AnalyticsDashboardProps): React.ReactElement {
   const { data, loading, error } = props
 
-  // MOCK data as fallback
-  const mockData = getAnalyticsData()
-
-  // Use real data where available, fallback to mock
   const heroData: HeroData = data ? {
-    aos: data.kpis.total_documents ?? 247,
-    winRate: data.kpis.win_rate ?? 68,
-    conformite: Math.round(data.kpis.avg_compliance_score ?? 94),
+    aos: data.kpis.total_documents ?? 0,
+    winRate: data.kpis.win_rate ?? 0,
+    conformite: Math.round(data.kpis.avg_compliance_score ?? 0),
     tenant: data.tenant.name,
-  } : mockData.hero
+  } : {
+    aos: 0,
+    winRate: 0,
+    conformite: 0,
+    tenant: 'N/A',
+  }
 
-  // COUCHE 1: partial real data
-  const couche1: KpiMetric[] = data && data.kpis ? [
+  const couche1: KpiMetric[] = data?.kpis ? [
     {
       title: 'Win rate global',
-      value: `${Math.round(data.kpis.win_rate ?? 68)}%`,
+      value: `${Math.round(data.kpis.win_rate ?? 0)}%`,
       delta: '+27 pts',
       deltaType: 'up',
       sub: 'vs marché (41%)',
       barColor: 'success',
-      barWidth: data.kpis.win_rate ?? 68,
+      barWidth: data.kpis.win_rate ?? 0,
     },
     {
       title: 'AOs soumis / analysés',
@@ -153,10 +151,8 @@ export default function AnalyticsDashboard(props: AnalyticsDashboardProps): Reac
       barColor: 'info',
       barWidth: Math.round(((data.status_distribution?.completed ?? 0) / (data.kpis.total_documents ?? 1)) * 100),
     },
-    ...mockData.couche1.slice(2),
-  ] : mockData.couche1
+  ] : []
 
-  // Return error state
   if (error) {
     return (
       <main className="flex-1 overflow-y-auto bg-[var(--cream)]">
@@ -176,7 +172,6 @@ export default function AnalyticsDashboard(props: AnalyticsDashboardProps): Reac
     <main className="flex-1 overflow-y-auto bg-[var(--cream)]">
       <Topbar />
       <div className="p-8">
-        {/* Loading state */}
         {loading && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -192,16 +187,14 @@ export default function AnalyticsDashboard(props: AnalyticsDashboardProps): Reac
 
         {!loading && (
           <>
-            {/* Hero Banner */}
             <HeroBanner hero={heroData} />
 
-            {/* Couche 1 */}
-            <SectionHeader label="Couche 1 — Performance commerciale" color="amber" />
+            <SectionHeader label="Performance commerciale" color="amber" />
             <motion.div
               variants={containerVariants}
               initial="hidden"
               animate="visible"
-              className="grid grid-cols-4 gap-4 mb-7"
+              className="grid grid-cols-2 gap-4 mb-7"
             >
               {couche1.map((m) => (
                 <motion.div key={m.title} variants={itemVariants}>
@@ -210,71 +203,28 @@ export default function AnalyticsDashboard(props: AnalyticsDashboardProps): Reac
               ))}
             </motion.div>
 
-            {/* Couche 2 */}
-            <SectionHeader label="Couche 2 — Qualité IA & Conformité" color="green" />
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-              className="grid grid-cols-4 gap-4 mb-7"
-            >
-              {mockData.couche2.map((m) => (
-                <motion.div key={m.title} variants={itemVariants}>
-                  <KpiCard metric={m} />
-                </motion.div>
-              ))}
-            </motion.div>
-
-            {/* Couche 3 - Row 1 */}
-            <SectionHeader label="Couche 3 — Efficacité opérationnelle" color="blue" />
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-              className="grid grid-cols-3 gap-4 mb-4"
-            >
-              {mockData.couche3row1.map((m) => (
-                <motion.div key={m.title} variants={itemVariants}>
-                  <KpiCard metric={m} />
-                </motion.div>
-              ))}
-            </motion.div>
-
-            {/* Couche 3 - Row 2 */}
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-              className="grid grid-cols-3 gap-4 mb-7"
-            >
-              {mockData.couche3row2.map((m) => (
-                <motion.div key={m.title} variants={itemVariants}>
-                  <KpiCard metric={m} />
-                </motion.div>
-              ))}
-            </motion.div>
-
-            {/* Couche 4 */}
-            <SectionHeader
-              label="Couche 4 — ROI & Rétention · Plan Enterprise"
-              color="amber-dark"
-            />
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-              className="grid grid-cols-3 gap-4 mb-7"
-            >
-              {mockData.couche4.map((m) => (
-                <motion.div key={m.title} variants={itemVariants}>
-                  <KpiCard metric={m} />
-                </motion.div>
-              ))}
-            </motion.div>
-
-            {/* Bottom Section: Charts + Team Activity */}
             <div className="grid grid-cols-[1fr_380px] gap-4 mb-8">
-              <SectorChart sectors={mockData.sectors} />
+              <div className="bg-white border border-[#E5E0D8] rounded-lg p-6">
+                <h3 className="font-heading text-[14px] font-bold text-[#0F1C35] mb-4">
+                  Documents récents
+                </h3>
+                {data?.recent_documents && data.recent_documents.length > 0 ? (
+                  <div className="space-y-3">
+                    {data.recent_documents.slice(0, 5).map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between pb-3 border-b border-[#E5E0D8] last:border-0">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-[#0F1C35] truncate">{doc.filename}</p>
+                          <p className="text-[10px] text-[#9B9590] mt-1">{doc.document_type}</p>
+                        </div>
+                        <span className="text-[10px] font-semibold text-[#6B6560] whitespace-nowrap ms-2">{doc.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#9B9590]">Aucun document récent</p>
+                )}
+              </div>
+
               <div className="bg-white border border-[#E5E0D8] rounded-lg p-6">
                 <h3 className="font-heading text-[14px] font-bold text-[#0F1C35] mb-4">
                   Activité récente

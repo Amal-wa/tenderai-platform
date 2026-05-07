@@ -3,6 +3,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
+import { verify2FA, extractErrorMessage } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import type { Verify2FARequest } from '@/types/auth'
 import {
   ShieldCheck,
   CheckCircle,
@@ -13,10 +16,12 @@ import {
 
 interface TotpFormProps {
   onBack: () => void
+  partialToken?: string
 }
 
-export default function TotpForm({ onBack }: TotpFormProps) {
+export default function TotpForm({ onBack, partialToken }: TotpFormProps) {
   const router = useRouter()
+  const { finalizeLogin } = useAuth()
   const [digits, setDigits] = useState<string[]>(Array(6).fill(''))
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
@@ -72,32 +77,53 @@ export default function TotpForm({ onBack }: TotpFormProps) {
     setError('')
 
     try {
-      // TODO: Replace with actual API call
-      await new Promise((r) => setTimeout(r, 1200))
-
       const code = digits.join('')
 
-      // Mock validation - only accept "000000" for demo
-      if (code === '000000') {
-        setIsSuccess(true)
+      if (!code || code.length !== 6) {
+        setError('Le code doit contenir 6 chiffres')
         setIsLoading(false)
-
-        // Redirect after success animation
-        setTimeout(() => {
-          router.push('/dashboard')
-        }, 1500)
-      } else {
-        setError('Code incorrect. Vérifiez votre application.')
-        setIsLoading(false)
-
-        // Shake animation: focus first input and clear digits
-        shake()
-        setDigits(Array(6).fill(''))
-        inputRefs.current[0]?.focus()
+        return
       }
-    } catch (err) {
-      setError('Erreur lors de la vérification. Veuillez réessayer.')
+
+      // Get partial_token from prop or sessionStorage
+      const token = partialToken || (typeof window !== 'undefined' ? sessionStorage.getItem('partial_token') : null)
+      
+      if (!token) {
+        setError('Session 2FA invalide. Veuillez réessayer.')
+        setIsLoading(false)
+        return
+      }
+
+      // Call verify2FA API
+      const req: Verify2FARequest = { totp_code: code }
+      await verify2FA(req, token)
+
+      // Success
+      setIsSuccess(true)
       setIsLoading(false)
+
+      // Clear sessionStorage and finalize login
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('partial_token')
+      }
+
+      // Redirect after success animation
+      setTimeout(async () => {
+        try {
+          await finalizeLogin()
+        } catch {
+          router.push('/dashboard')
+        }
+      }, 1500)
+    } catch (err) {
+      const msg = extractErrorMessage(err)
+      setError(msg)
+      setIsLoading(false)
+
+      // Shake animation: focus first input and clear digits
+      shake()
+      setDigits(Array(6).fill(''))
+      inputRefs.current[0]?.focus()
     }
   }
 

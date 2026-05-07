@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,7 @@ from ..auth import get_current_user
 from ..models import User, APIKey
 from ..security.api_keys import generate_api_key, validate_scopes, API_KEY_SCOPES
 from ..audit_service import log_action
+from ..core.ratelimit import get_client_ip
 
 import logging
 logger = logging.getLogger(__name__)
@@ -79,9 +80,10 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_api_key(
-    request: APIKeyCreateRequest,
+    request_body: APIKeyCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    http_request: Request = None,
 ):
     """
     Crée une nouvelle clé API.
@@ -102,8 +104,8 @@ async def create_api_key(
     # ── VALIDATION ──────────────────────────────────────────────────────────
     
     # Vérifier les scopes fournis
-    if request.permissions:
-        if not validate_scopes(request.permissions):
+    if request_body.permissions:
+        if not validate_scopes(request_body.permissions):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid scopes. Valid scopes: {API_KEY_SCOPES}",
@@ -116,18 +118,18 @@ async def create_api_key(
     
     # Calculer expires_at si expiration demandée
     expires_at = None
-    if request.expires_in_days:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=request.expires_in_days)
+    if request_body.expires_in_days:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=request_body.expires_in_days)
     
     # ── CRÉATION EN DB ──────────────────────────────────────────────────────
     
     api_key = APIKey(
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
-        name=request.name,
+        name=request_body.name,
         key_prefix=prefix,
         key_hash=key_hash,
-        permissions=request.permissions or [],
+        permissions=request_body.permissions or [],
         expires_at=expires_at,
     )
     
@@ -150,11 +152,13 @@ async def create_api_key(
             db=db,
             tenant_id=current_user.tenant_id,
             user_id=current_user.id,
-            action="api_key.created",
+            action="apikey.created",
             resource_type="api_key",
-            resource_id=api_key.id,
-            new_value={"name": request.name, "prefix": prefix},
+            resource_id=str(api_key.id),
+            new_value={"name": request_body.name, "prefix": prefix, "permissions": request_body.permissions or []},
             status="success",
+            ip_address=get_client_ip(http_request) if http_request else None,
+            user_agent=http_request.headers.get("user-agent") if http_request else None,
         )
     except Exception as e:
         logger.warning(f"⚠️  Failed to log audit: {e}")
@@ -231,6 +235,7 @@ async def revoke_api_key(
     key_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    http_request: Request = None,
 ):
     """
     Révoque une clé API par son ID.
@@ -296,11 +301,13 @@ async def revoke_api_key(
             db=db,
             tenant_id=current_user.tenant_id,
             user_id=current_user.id,
-            action="api_key.revoked",
+            action="apikey.revoked",
             resource_type="api_key",
-            resource_id=api_key.id,
+            resource_id=str(api_key.id),
             old_value={"name": api_key.name, "prefix": api_key.key_prefix},
             status="success",
+            ip_address=get_client_ip(http_request) if http_request else None,
+            user_agent=http_request.headers.get("user-agent") if http_request else None,
         )
     except Exception as e:
         logger.warning(f"⚠️  Failed to log audit: {e}")

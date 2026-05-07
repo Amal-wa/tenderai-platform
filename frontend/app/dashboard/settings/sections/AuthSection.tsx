@@ -9,17 +9,13 @@ import type { UserProfile } from '@/types/auth'
 
 export default function AuthSection({ onDirtyChange: _onDirtyChange }: { isDirty: boolean; onDirtyChange: (dirty: boolean) => void }) {
   const { user, updateUserProfile } = useAuth()
-  const { disableTotp, setupTotp, verifyTotp } = useSettings()
+  const { setupTotp, verifyTotp } = useSettings()
 
-  const [isDisabling, setIsDisabling] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [isSettingUp, setIsSettingUp] = useState(false)
-  const [showDisableModal, setShowDisableModal] = useState(false)
-  const [disablePassword, setDisablePassword] = useState('')
   const [newBackupCodes, setNewBackupCodes] = useState<string[]>([])
   const [showNewCodes, setShowNewCodes] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   
   const [showSetup2FAModal, setShowSetup2FAModal] = useState(false)
   const [setupQRCode, setSetupQRCode] = useState<string | null>(null)
@@ -52,32 +48,8 @@ export default function AuthSection({ onDirtyChange: _onDirtyChange }: { isDirty
     }
   }, [showSetup2FAModal])
 
-  const handleDisable2FA = async () => {
-    if (!disablePassword.trim()) {
-      setError('Veuillez entrer votre mot de passe')
-      return
-    }
-
-    setIsDisabling(true)
-    setError(null)
-
-    try {
-      await disableTotp({ password: disablePassword })
-      setShowDisableModal(false)
-      setDisablePassword('')
-      const response = await api.get('/api/v1/auth/me')
-      const profile = response.data as UserProfile
-      updateUserProfile({ totp_enabled: profile.totp_enabled })
-    } catch (err) {
-      setError(extractErrorMessage(err))
-    } finally {
-      setIsDisabling(false)
-    }
-  }
-
   const handleRegenerateBackupCodes = async () => {
     setIsRegenerating(true)
-    setError(null)
 
     try {
       const response = await api.post<{ backup_codes: string[]; message: string }>(
@@ -86,14 +58,13 @@ export default function AuthSection({ onDirtyChange: _onDirtyChange }: { isDirty
       setNewBackupCodes(response.data.backup_codes)
       setShowNewCodes(true)
     } catch (err) {
-      setError(extractErrorMessage(err))
+      console.error('Failed to regenerate backup codes:', err)
     } finally {
       setIsRegenerating(false)
     }
   }
 
   const handleSetup2FAClick = () => {
-    setError(null)
     setShowSetup2FAModal(true)
     setSetupError(null)
     setVerificationCode('')
@@ -199,22 +170,7 @@ export default function AuthSection({ onDirtyChange: _onDirtyChange }: { isDirty
           </div>
 
           <div className="flex justify-start gap-2 pt-2">
-            {user?.totp_enabled ? (
-              <button
-                onClick={() => {
-                  setError(null)
-                  setShowDisableModal(true)
-                }}
-                disabled={isDisabling}
-                className="px-3.5 py-1.5 text-xs font-medium rounded border transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  borderColor: 'var(--color-text-danger, #E24B4A)',
-                  color: 'var(--color-text-danger, #E24B4A)',
-                }}
-              >
-                Désactiver la 2FA
-              </button>
-            ) : (
+            {!user?.totp_enabled && (
               <button
                 onClick={handleSetup2FAClick}
                 disabled={isSettingUp}
@@ -260,71 +216,6 @@ export default function AuthSection({ onDirtyChange: _onDirtyChange }: { isDirty
           </button>
         </div>
       </div>
-
-      {/* Modal — Disable 2FA */}
-      {showDisableModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-md w-full shadow-lg">
-            <div className="p-6 border-b" style={{ borderColor: 'var(--color-border-tertiary, #E5E0D8)' }}>
-              <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary, #0F1C35)' }}>
-                Désactiver l'authentification 2FA
-              </h2>
-              <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary, #3A3530)' }}>
-                Veuillez entrer votre mot de passe pour confirmer
-              </p>
-            </div>
-
-            <div className="p-6 space-y-4">
-              {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                  {error}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-medium mb-2" style={{ color: 'var(--color-text-primary, #0F1C35)' }}>
-                  Mot de passe
-                </label>
-                <input
-                  type="password"
-                  value={disablePassword}
-                  onChange={(e) => setDisablePassword(e.target.value)}
-                  placeholder="Entrez votre mot de passe"
-                  disabled={isDisabling}
-                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none transition"
-                  style={{
-                    borderColor: 'var(--color-border-secondary, #E5E0D8)',
-                    color: 'var(--color-text-primary, #0F1C35)',
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="p-6 border-t flex gap-2" style={{ borderColor: 'var(--color-border-tertiary, #E5E0D8)' }}>
-              <button
-                onClick={() => {
-                  setShowDisableModal(false)
-                  setDisablePassword('')
-                  setError(null)
-                }}
-                disabled={isDisabling}
-                className="flex-1 px-3 py-2 text-xs font-medium rounded border transition disabled:opacity-50"
-                style={{ borderColor: 'var(--color-border-secondary, #E5E0D8)', color: 'var(--color-text-secondary, #3A3530)' }}
-              >
-                Annuler
-              </button>
-              <button
-                onClick={handleDisable2FA}
-                disabled={isDisabling || !disablePassword.trim()}
-                className="flex-1 px-3 py-2 text-xs font-medium rounded text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--color-text-danger, #E24B4A)' }}
-              >
-                {isDisabling ? 'Chargement...' : 'Désactiver'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal — New Backup Codes */}
       {showNewCodes && (

@@ -8,6 +8,7 @@ import logging
 import uuid as _uuid
 import hashlib
 import magic
+import redis
 from io import BytesIO
 from contextlib import asynccontextmanager
 from datetime import timedelta, datetime, timezone
@@ -68,7 +69,7 @@ from .core.dependencies import (
 )
 from .core.middleware import (
     SecurityHeadersMiddleware, RBACMiddleware, TenantContextMiddleware,
-    RequestIdMiddleware, LoggingMiddleware, JWTAuthMiddleware,
+    RateLimitMiddleware, IdempotencyMiddleware, RequestIdMiddleware, LoggingMiddleware, JWTAuthMiddleware,
     SSRFGuardMiddleware, ensure_tenant_context
 )
 from .core.permissions import is_super_admin
@@ -414,11 +415,29 @@ app.add_middleware(
 # Add RBAC middleware for extracting auth context from JWT
 app.add_middleware(RBACMiddleware)
 
+# JWT validation middleware
+app.add_middleware(JWTAuthMiddleware)
+
 # Automatically activate tenant context (RLS) for protected routes
 # This middleware ensures set_tenant_context() is called before each request
 # if the user is authenticated (tenant_id is present in JWT).
 # Routes excluded: /health, /api/v1/auth/*, /docs, /metrics
 app.add_middleware(TenantContextMiddleware)
+
+# Rate limiting middleware (Token Bucket via Redis)
+app.add_middleware(RateLimitMiddleware)
+
+# Idempotency middleware for POST/PUT/PATCH requests
+app.add_middleware(IdempotencyMiddleware)
+
+# SSRF protection middleware
+app.add_middleware(SSRFGuardMiddleware)
+
+# Structured logging middleware
+app.add_middleware(LoggingMiddleware)
+
+# Request ID generation middleware
+app.add_middleware(RequestIdMiddleware)
 
 
 # ==============================================================================
@@ -1068,7 +1087,6 @@ async def login(request: Request, credentials: UserLogin = Body(...), db: Sessio
     user = db.query(User).filter(User.email == credentials.email).first()
 
     if not user or not verify_password(credentials.password, user.hashed_password):
-        #  Message générique intentionnel : on ne révèle pas si l'email existe
         record_login_attempt(
             db=db,
             email=credentials.email,
@@ -1078,6 +1096,21 @@ async def login(request: Request, credentials: UserLogin = Body(...), db: Sessio
             user_agent=user_agent,
             user_id=user.id if user else None,
         )
+        
+        log_action(
+            db=db,
+            user_id=user.id if user else None,
+            tenant_id=user.tenant_id if user else None,
+            action="session.failed",
+            resource_type="auth",
+            resource_id=user.id if user else credentials.email,
+            status="failure",
+            reason="Invalid credentials",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.commit()
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email ou mot de passe incorrect",
@@ -1094,9 +1127,23 @@ async def login(request: Request, credentials: UserLogin = Body(...), db: Sessio
             user_agent=user_agent,
             user_id=user.id,
         )
+        
+        log_action(
+            db=db,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            action="session.failed",
+            resource_type="auth",
+            resource_id=user.id,
+            status="failure",
+            reason="Account inactive",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.commit()
+        
         raise HTTPException(status_code=403, detail="Compte désactivé")
 
-    # ── Check if email is verified ──────────────────────────────────────────
     if not user.email_verified:
         record_login_attempt(
             db=db,
@@ -1107,6 +1154,21 @@ async def login(request: Request, credentials: UserLogin = Body(...), db: Sessio
             user_agent=user_agent,
             user_id=user.id,
         )
+        
+        log_action(
+            db=db,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            action="session.failed",
+            resource_type="auth",
+            resource_id=user.id,
+            status="failure",
+            reason="Email not verified",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.commit()
+        
         raise HTTPException(
             status_code=403,
             detail={
@@ -1242,33 +1304,18 @@ async def login(request: Request, credentials: UserLogin = Body(...), db: Sessio
         user_id=user.id,
     )
     
-   
-    user.last_login_at = datetime.now(timezone.utc)
-    
-    # PROBLÈME 3 : Calculer le vrai hash SHA-256 au lieu de "pending"
-    from .security.audit import compute_audit_hash, get_previous_audit_hash
-    previous_hash = get_previous_audit_hash(db)
-    entry_data = {
-        "tenant_id": str(user.tenant_id),
-        "user_id": str(user.id),
-        "action": "login",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ip_address": ip_address,
-    }
-    
-    audit_log = AuditLog(
-        tenant_id=user.tenant_id,
+    log_action(
+        db=db,
         user_id=user.id,
+        tenant_id=user.tenant_id,
         action="session.started",
         resource_type="auth",
-        resource_id=user.id,
+        resource_id=str(user.id),
         status="success",
+        reason="User login successful",
         ip_address=ip_address,
-        timestamp=datetime.now(timezone.utc),
-        hash=compute_audit_hash(entry_data, previous_hash),
-        previous_hash=previous_hash,
+        user_agent=user_agent,
     )
-    db.add(audit_log)
     db.commit()
 
    
@@ -2171,7 +2218,8 @@ async def invite_user(
             tenant_id=current_user.tenant_id,
             inviter_name=current_user.full_name or current_user.email,
             organization_name=current_user.tenant.name if current_user.tenant else "TenderAI",
-            role=body.role
+            role=body.role,
+            frontend_url=os.getenv("FRONTEND_URL", "http://localhost:3000"),
         )
         
         if not success:
@@ -2244,7 +2292,7 @@ async def accept_invitation(
         )
     
     try:
-        success, message = accept_user_invitation(
+        success, message, user_id = accept_user_invitation(
             db=db,
             token=body.token,
             full_name=body.full_name,
@@ -2256,6 +2304,21 @@ async def accept_invitation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=message
             )
+        
+        # Store pending invitation token for deletion after TOTP setup
+        if user_id:
+            try:
+                redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+                redis_client = redis.from_url(redis_url, decode_responses=True)
+                redis_client.setex(
+                    f"invite_pending_2fa:{user_id}",
+                    3600,  # 1 hour TTL
+                    body.token
+                )
+                logger.debug(f"✅ Stored pending invitation token | user={user_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to store pending token | error={str(e)}")
+                # Continue anyway - token will be cleaned up on TOTP or after 7 days
         
         return {
             "status": "success",
@@ -2311,30 +2374,18 @@ async def logout(
     # Log successful logout to audit trail
     ip_address = get_client_ip(request)
     
-    # Compute audit hash for this entry using previous hash from DB
-    from .security.audit import compute_audit_hash, get_previous_audit_hash
-    previous_hash = get_previous_audit_hash(db)
-    entry_data = {
-        "tenant_id": str(current_user.tenant_id),
-        "user_id": str(current_user.id),
-        "action": "session.ended",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ip_address": ip_address,
-    }
-    
-    audit_log = AuditLog(
-        tenant_id=current_user.tenant_id,
+    log_action(
+        db=db,
         user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
         action="session.ended",
         resource_type="auth",
-        resource_id=current_user.id,
+        resource_id=str(current_user.id),
         status="success",
+        reason="User logged out",
         ip_address=ip_address,
-        timestamp=datetime.now(timezone.utc),
-        hash=compute_audit_hash(entry_data, previous_hash),
-        previous_hash=previous_hash,
+        user_agent=request.headers.get("user-agent") if request else None,
     )
-    db.add(audit_log)
     db.commit()
 
     response = JSONResponse(content={"message": "Logged out successfully"})
@@ -3893,30 +3944,18 @@ async def list_audit_logs(
     action: Optional[str] = Query(None),
     since: Optional[str] = Query(None, description="ISO 8601 timestamp — filtre timestamp >= since"),
     until: Optional[str] = Query(None, description="ISO 8601 timestamp — filtre timestamp <= until"),
-    search: Optional[str] = Query(None, description="Recherche textuelle sur user_email + ip_address (ILIKE)"),
+    search: Optional[str] = Query(None, description="Recherche textuelle sur ip_address (ILIKE)"),
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
     from datetime import datetime as dt
+    from sqlalchemy.orm import joinedload
     
     if current_user.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Accès refusé")
     
-   
-    from sqlalchemy.orm import aliased
-    UserAlias = aliased(User)
-    
-    q = db.query(
-        AuditLog,
-        UserAlias.email.label("user_email"),
-        UserAlias.full_name.label("user_name")
-    ).outerjoin(
-        UserAlias,
-        and_(
-            AuditLog.user_id == UserAlias.id,
-            AuditLog.tenant_id == UserAlias.tenant_id  # Scoped au tenant
-        )
-    ).filter(AuditLog.tenant_id == tenant_id)
+    # Query avec jointure vers User pour récupérer email et nom
+    q = db.query(AuditLog).outerjoin(User).filter(AuditLog.tenant_id == tenant_id)
     
     # Appliquer les filtres (AVANT la pagination)
     if resource_type:
@@ -3940,13 +3979,15 @@ async def list_audit_logs(
         except (ValueError, TypeError):
             raise HTTPException(status_code=422, detail="Paramètre 'until' invalide. Utilisez ISO 8601.")
     
-    # Recherche textuelle (ILIKE sur email + IP)
+    # Recherche textuelle (sur IP, email, ou nom utilisateur)
     if search:
         search_pattern = f"%{search}%"
         q = q.filter(
             or_(
-                UserAlias.email.ilike(search_pattern),
-                AuditLog.ip_address.ilike(search_pattern)
+                AuditLog.ip_address.ilike(search_pattern),
+                User.email.ilike(search_pattern),
+                User.first_name.ilike(search_pattern),
+                User.last_name.ilike(search_pattern)
             )
         )
     
@@ -3957,19 +3998,17 @@ async def list_audit_logs(
     offset = (page - 1) * page_size
     results = q.order_by(desc(AuditLog.timestamp)).offset(offset).limit(page_size).all()
     
-    # Construire les réponses — mapper les colonnes jointes
+    # Convertir en réponses Pydantic avec enrichissement user
     items = []
-    for result in results:
-        if isinstance(result, tuple):
-            log, user_email, user_name = result
-        else:
-            log = result
-            user_email = None
-            user_name = None
-        
-        log_dict = AuditLogResponse.model_validate(log).model_dump()
-        log_dict["user_email"] = user_email
-        log_dict["user_name"] = user_name
+    for log in results:
+        log_dict = AuditLogResponse.model_validate(log, from_attributes=True).model_dump()
+        # Enrichir avec les données utilisateur jointes
+        if log.user_id:
+            # La jointure a amené les données User, on peut y accéder via le contexte
+            user = db.query(User).filter(User.id == log.user_id).first()
+            if user:
+                log_dict['user_email'] = user.email
+                log_dict['user_name'] = user.full_name or user.email
         items.append(AuditLogResponse(**log_dict))
     
     return PaginatedResponse(
@@ -4444,5 +4483,31 @@ async def http_exception_handler(request, exc):
     # Ajouter le header Retry-After pour les erreurs 429 (Too Many Requests)
     if exc.status_code == 429 and retry_after:
         response.headers["Retry-After"] = str(retry_after)
+    
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Catch-all handler for unexpected exceptions.
+    
+    Logs the full exception with Sentry and returns a standardized
+    500 error response without exposing implementation details.
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    
+    logger.exception(
+        f"Unhandled exception | request_id={request_id} | path={request.url.path}"
+    )
+    
+    response = JSONResponse(
+        status_code=500,
+        content=ErrorResponse(
+            detail="Erreur interne du serveur",
+            error_code="internal_error",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        ).model_dump(mode='json'),
+    )
     
     return response

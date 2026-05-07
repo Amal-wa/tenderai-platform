@@ -12,9 +12,7 @@ from ..database import get_db as _get_db, set_tenant_context
 from ..auth import get_current_user as _get_current_user
 from ..security.api_keys import verify_api_key
 
-#  Importer depuis authz.py qui est lui-même la source centralisée
 from .authz import (
-    require_permission,   # Dépendance par permission "module:action"
     require_role,         # Dépendance par rôle exact
     require_any_role,     # Dépendance acceptant plusieurs rôles
     check_permission,     # Fonction utilitaire de vérification
@@ -94,6 +92,59 @@ async def get_current_auth(
 
 
 # ==============================================================================
+#  API KEY PERMISSION CHECKING
+# ==============================================================================
+
+from typing import Callable
+
+def require_permission(permission: str) -> Callable:
+    """
+    Factory for API key permission validation dependency.
+
+    Ensures that authenticated user has the required permission via API key.
+    Rejects JWT-only authentication (requires API key).
+
+    Args:
+        permission: Required permission scope (e.g., "documents:read")
+
+    Returns:
+        FastAPI dependency function that validates permission
+    """
+
+    async def dependency(
+        auth: dict = Depends(get_current_auth),
+    ) -> dict:
+        """
+        Validates that auth is via API key and has required permission.
+
+        Args:
+            auth: Authentication result from get_current_auth()
+
+        Returns:
+            auth dict if validation passes
+
+        Raises:
+            HTTPException(403): If API key not provided or permission missing
+        """
+        if auth.get("type") != "api_key":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key required",
+            )
+
+        permissions: list[str] = auth.get("permissions", [])
+        if permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+
+        return auth
+
+    return dependency
+
+
+# ==============================================================================
 #   RATE LIMITING DEPENDENCIES
 # ==============================================================================
 
@@ -163,8 +214,10 @@ __all__ = [
     "get_db",
     # Auth
     "get_current_user",
-    # RBAC
+    "get_current_auth",
+    # API Key Permissions
     "require_permission",
+    # RBAC
     "require_role",
     "require_any_role",
     "check_permission",

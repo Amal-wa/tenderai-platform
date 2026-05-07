@@ -17,9 +17,11 @@ WORKDIR /app
 # Configurer Poetry pour installer dans l’environnement système
 RUN poetry config virtualenvs.create false
 
-# Copier uniquement les fichiers de dépendances
-COPY pyproject.toml ./
-COPY poetry.lock* ./
+# Copier les fichiers de dépendances avec verification
+COPY pyproject.toml poetry.lock* /app/
+
+# Verifier que pyproject.toml existe
+RUN ls -la /app/ && test -f /app/pyproject.toml || (echo "ERROR: pyproject.toml not found" && exit 1)
 
 # Installer les dépendances + le projet
 RUN poetry install --no-interaction --no-ansi --no-root --only main

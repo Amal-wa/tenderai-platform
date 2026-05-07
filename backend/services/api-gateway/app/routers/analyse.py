@@ -2,7 +2,7 @@
 # ROUTERS/ANALYSE.PY — Analyse IA Routes
 # ==============================================================================
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc
 from typing import List, Optional
@@ -12,6 +12,8 @@ from ..database import get_db, set_tenant_context
 from ..auth import get_current_user
 from ..core.middleware import ensure_tenant_context
 from ..models import User, ComplianceReport, Document
+from ..audit_service import log_action
+from ..core.ratelimit import get_client_ip
 from ..schemas import (
     AnalyseStatsResponse, 
     AnalyseRequestSchema,
@@ -102,6 +104,7 @@ async def run_analyse(
     payload: AnalyseRequestSchema,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    http_request: Request = None,
     _: None = Depends(ensure_tenant_context),
 ):
     """
@@ -111,6 +114,22 @@ async def run_analyse(
     Types: 'conformite' | 'technique' | 'financier' | 'complet'
     Langues: 'FR' | 'AR' | 'EN'
     """
+    
+    # Log analysis start
+    log_action(
+        db=db,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        action="analysis.started",
+        resource_type="analysis",
+        resource_id=payload.document_id if hasattr(payload, 'document_id') else "unknown",
+        new_value={"type": payload.type if hasattr(payload, 'type') else None, "language": payload.language if hasattr(payload, 'language') else None},
+        status="success",
+        reason="Analysis initiated by user",
+        ip_address=get_client_ip(http_request) if http_request else None,
+        user_agent=http_request.headers.get("user-agent") if http_request else None,
+    )
+    db.commit()
     
     # Placeholder: returner un résultat dummy
     return AnalyseResultResponse(
@@ -186,11 +205,27 @@ async def export_analyse(
     analyse_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    http_request: Request = None,
     _: None = Depends(ensure_tenant_context),
 ):
     """
     Exporte les résultats d'une analyse en PDF.
     """
+    
+    # Log analysis export
+    log_action(
+        db=db,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        action="analysis.exported",
+        resource_type="analysis",
+        resource_id=analyse_id,
+        status="success",
+        reason="Analysis exported as PDF",
+        ip_address=get_client_ip(http_request) if http_request else None,
+        user_agent=http_request.headers.get("user-agent") if http_request else None,
+    )
+    db.commit()
     
     # Placeholder: returner un dummy PDF
     raise HTTPException(

@@ -14,7 +14,6 @@ import type {
   SessionRevokeResponse,
   TOTPSetupResponse,
   TOTPVerifyRequest,
-  TOTPDisableRequest,
 } from '@/types/settings'
 
 export function useSettings() {
@@ -68,8 +67,5 @@ export function useSettings() {
     
     verifyTotp: (data: TOTPVerifyRequest) => 
       api.post('/api/v1/auth/2fa/verify', data),
-    
-    disableTotp: (data: TOTPDisableRequest) => 
-      api.post('/api/v1/auth/2fa/disable', data),
   }
 }

@@ -104,6 +104,8 @@ export default function SettingsClient() {
     .join('')
     .toUpperCase() || 'U'
 
+  const userRole = typeof user.role === 'string' ? user.role : user.role?.name
+
   return (
     <div className="flex h-screen bg-[var(--cream)]" style={{ backgroundColor: 'var(--color-cream, #F5F3EE)' }}>
       {/* SIDEBAR */}
@@ -199,7 +201,7 @@ export default function SettingsClient() {
               {user.full_name}
             </div>
             <div className="text-[11px] truncate" style={{ color: 'var(--color-text-tertiary, #6B6560)' }}>
-              {user.role} · {user.tenant_name}
+              {userRole} · {user.tenant_name}
             </div>
           </div>
           <button

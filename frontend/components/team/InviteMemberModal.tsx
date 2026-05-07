@@ -133,7 +133,8 @@ export default function InviteMemberModal({
   }
 
   // Don't render if not authenticated or not admin
-  if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) {
+  const userRole = typeof user?.role === 'string' ? user?.role : user?.role?.name
+  if (!user || (userRole !== 'admin' && userRole !== 'superadmin')) {
     return <></>
   }
 

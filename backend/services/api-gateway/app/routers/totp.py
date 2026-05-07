@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from typing import Optional
 import os
+import redis
 from cryptography.fernet import Fernet
 import logging
 
@@ -45,10 +46,6 @@ class TOTPVerifyRequest(BaseModel):
     code: str
 
 
-class TOTPDisableRequest(BaseModel):
-    password: str
-
-
 class TOTPSetupResponse(BaseModel):
     qr_code: str
     secret: str
@@ -59,10 +56,6 @@ class TOTPSetupResponse(BaseModel):
 class TOTPVerifyResponse(BaseModel):
     message: str
     is_enabled: bool
-
-
-class TOTPDisableResponse(BaseModel):
-    message: str
 
 
 class TOTPRegenerateBackupCodesResponse(BaseModel):
@@ -135,6 +128,20 @@ async def setup_2fa(
     
     # Generate new secret
     secret = generate_totp_secret()
+    
+    log_action(
+        db=db,
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        action="totp.setup_initiated",
+        resource_type="user",
+        resource_id=current_user.id,
+        status="success",
+        reason="2FA setup initiated",
+        ip_address=get_client_ip(http_request),
+        user_agent=http_request.headers.get("user-agent") if http_request else None,
+    )
+    db.commit()
     
     # Check if uncommitted setup exists (replace it)
     totp_record = db.query(UserTOTP).filter(
@@ -215,21 +222,6 @@ async def verify_2fa(
     
     # Verify TOTP code
     if not verify_totp_code(decrypted_secret, request.code):
-        # Log failed verification attempt
-        log_action(
-            db=db,
-            user_id=current_user.id,
-            tenant_id=current_user.tenant_id,
-            action="totp.verified",
-            resource_type="2fa",
-            resource_id=current_user.id,
-            status="failure",
-            reason="Invalid 2FA code",
-            ip_address=http_request.client.host if http_request else None,
-            user_agent=http_request.headers.get("user-agent") if http_request else None,
-        )
-        db.commit()
-        
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid code",
@@ -240,19 +232,35 @@ async def verify_2fa(
     totp_record.verified_at = datetime.now(timezone.utc)
     db.commit()
     
-    # Log successful verification
+    # Clean up pending invitation token if this user was invited
+    try:
+        redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+        
+        pending_key = f"invite_pending_2fa:{current_user.id}"
+        pending_token = redis_client.get(pending_key)
+        
+        if pending_token:
+            # Delete both the pending marker and the actual invitation token
+            redis_client.delete(pending_key)
+            redis_client.delete(f"invite:{pending_token}")
+            logger.info(f"✅ Cleaned up invitation tokens after 2FA | user={current_user.id}")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to cleanup invitation tokens | error={str(e)}")
+        # Continue anyway - tokens will expire naturally
+    # Log successful activation
     log_action(
         db=db,
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
-        action="totp.enabled",
-        resource_type="2fa",
+        action="totp.activated",
+        resource_type="user",
         resource_id=current_user.id,
         old_value={"is_enabled": False},
         new_value={"is_enabled": True, "verified_at": datetime.now(timezone.utc).isoformat()},
         status="success",
-        reason="2FA successfully activated",
-        ip_address=http_request.client.host if http_request else None,
+        reason="2FA activated after code verification",
+        ip_address=get_client_ip(http_request),
         user_agent=http_request.headers.get("user-agent") if http_request else None,
     )
     db.commit()
@@ -260,103 +268,6 @@ async def verify_2fa(
     return TOTPVerifyResponse(
         message="2FA activated successfully",
         is_enabled=True,
-    )
-
-
-@router.post("/disable", response_model=TOTPDisableResponse)
-async def disable_2fa(
-    http_request: Request,
-    request: TOTPDisableRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Disable 2FA for the current user.
-    
-    Requires password verification for security.
-    """
-    
-    # Check if user has a password set
-    if not current_user.hashed_password:
-        logger.error(f"User {current_user.id} has no hashed_password configured")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User password not configured",
-        )
-    
-    # NOW verify password (after confirming hash exists)
-    # Verify password - arguments are: (plain_password, hashed_password)
-    #  Important: the order matters!
-    if not verify_password(request.password, current_user.hashed_password):
-        logger.warning(f"Invalid password verification attempt for 2FA disable by user {current_user.id}")
-        log_action(
-            db=db,
-            user_id=current_user.id,
-            tenant_id=current_user.tenant_id,
-            action="totp.disabled",
-            resource_type="2fa",
-            resource_id=current_user.id,
-            status="failure",
-            reason="Invalid password",
-            ip_address=http_request.client.host if http_request else None,
-            user_agent=http_request.headers.get("user-agent") if http_request else None,
-        )
-        db.commit()
-        
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid password",
-        )
-    
-    # Check if 2FA is enabled
-    totp_record = db.query(UserTOTP).filter(
-        UserTOTP.user_id == current_user.id,
-        UserTOTP.is_enabled,
-    ).first()
-    
-    if not totp_record:
-        log_action(
-            db=db,
-            user_id=current_user.id,
-            tenant_id=current_user.tenant_id,
-            action="totp.disabled",
-            resource_type="2fa",
-            resource_id=current_user.id,
-            status="failure",
-            reason="2FA not enabled",
-            ip_address=http_request.client.host if http_request else None,
-            user_agent=http_request.headers.get("user-agent") if http_request else None,
-        )
-        db.commit()
-        
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="2FA is not enabled for this account",
-        )
-    
-    # Delete TOTP record
-    db.delete(totp_record)
-    db.commit()
-    
-    # Log successful deactivation
-    log_action(
-        db=db,
-        user_id=current_user.id,
-        tenant_id=current_user.tenant_id,
-        action="totp.disabled",
-        resource_type="2fa",
-        resource_id=current_user.id,
-        old_value={"is_enabled": True},
-        new_value={"is_enabled": False},
-        status="success",
-        reason="2FA disabled by user",
-        ip_address=http_request.client.host if http_request else None,
-        user_agent=http_request.headers.get("user-agent") if http_request else None,
-    )
-    db.commit()
-    
-    return TOTPDisableResponse(
-        message="2FA disabled successfully",
     )
 
 
@@ -394,13 +305,13 @@ async def regenerate_backup_codes(
         db=db,
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
-        action="regenerate_backup_codes",
-        resource_type="2fa",
+        action="totp.backup_codes_regenerated",
+        resource_type="user",
         resource_id=current_user.id,
         new_value={"codes_count": len(plaintext_codes)},
         status="success",
         reason="Backup codes regenerated by user",
-        ip_address=http_request.client.host if http_request else None,
+        ip_address=get_client_ip(http_request),
         user_agent=http_request.headers.get("user-agent") if http_request else None,
     )
     db.commit()
@@ -581,8 +492,8 @@ async def login_with_2fa(
             db=db,
             user_id=user.id,
             tenant_id=user.tenant_id,
-            action="session.failed",
-            resource_type="auth_session",
+            action="totp.login_failed",
+            resource_type="user",
             resource_id=user.id,
             status="failure",
             reason="Invalid TOTP code or backup code",
@@ -595,6 +506,21 @@ async def login_with_2fa(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid TOTP code or backup code.",
         )
+    
+    # Log successful 2FA code verification
+    log_action(
+        db=db,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        action="totp.login_success",
+        resource_type="user",
+        resource_id=user.id,
+        status="success",
+        reason="2FA code verified successfully",
+        ip_address=http_request.client.host if http_request else None,
+        user_agent=http_request.headers.get("user-agent") if http_request else None,
+    )
+    db.commit()
     
     # If backup code was used, update remaining codes
     if is_backup_valid:

@@ -102,7 +102,3 @@ export interface TOTPSetupResponse {
 export interface TOTPVerifyRequest {
   code: string
 }
-
-export interface TOTPDisableRequest {
-  password: string
-}

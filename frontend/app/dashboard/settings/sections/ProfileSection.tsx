@@ -81,6 +81,8 @@ export default function ProfileSection({ onDirtyChange }: { isDirty: boolean; on
     .join('')
     .toUpperCase() || 'U'
 
+  const userRole = typeof user?.role === 'string' ? user?.role : user?.role?.name
+
   return (
     <div className="space-y-6">
       {/* Card 1 — Avatar + Personal Info */}
@@ -113,7 +115,7 @@ export default function ProfileSection({ onDirtyChange }: { isDirty: boolean; on
                   border: '0.5px solid rgba(196,150,42,0.25)',
                 }}
               >
-                {user?.role}
+                {userRole}
               </span>
               <span className="text-xs" style={{ color: 'var(--color-text-tertiary, #6B6560)' }}>
                 {user?.tenant_name}

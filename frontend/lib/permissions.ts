@@ -30,8 +30,8 @@ export const PERMISSIONS = {
   ADMIN_SETTINGS: 'admin:settings',
 } as const
 
-type Role = (typeof ROLES)[keyof typeof ROLES]
-type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS]
+export type Role = (typeof ROLES)[keyof typeof ROLES]
+export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS]
 
 /**
  * Role-to-permissions mapping

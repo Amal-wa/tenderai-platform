@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthLeftPanel from '@/components/auth/AuthLeftPanel'
 import OTPInput from '@/components/ui/OTPInput'
@@ -33,6 +33,9 @@ export default function TwoFALoginPage(): JSX.Element {
   // Attempts
   const [attemptCount, setAttemptCount] = useState<number>(0)
   const maxAttempts = 5
+
+  // Submission guard (synchronous, prevents race conditions)
+  const isSubmittingRef = useRef(false)
 
   // Load partialToken from sessionStorage on mount & validate
   useEffect(() => {
@@ -80,18 +83,25 @@ export default function TwoFALoginPage(): JSX.Element {
   }
 
   const handleVerifyTOTP = async () => {
+    // Synchronous guard: prevent concurrent submissions
+    if (isSubmittingRef.current) return
+    isSubmittingRef.current = true
+
     if (code.length !== 6) {
       setError('Le code doit contenir 6 chiffres')
+      isSubmittingRef.current = false
       return
     }
 
     if (attemptCount >= maxAttempts) {
       setError(`Trop de tentatives. Veuillez réessayer dans 5 minutes.`)
+      isSubmittingRef.current = false
       return
     }
 
     if (!partialToken) {
       setError('Session 2FA invalide. Veuillez réessayer.')
+      isSubmittingRef.current = false
       return
     }
 
@@ -124,22 +134,30 @@ export default function TwoFALoginPage(): JSX.Element {
       setCode('')
     } finally {
       setIsLoading(false)
+      isSubmittingRef.current = false
     }
   }
 
-  const handleVerifyBackupCode = async () => {
+  const handleVerifyBackupCode = async ()=> {
+    // Synchronous guard: prevent concurrent submissions
+    if (isSubmittingRef.current) return
+    isSubmittingRef.current = true
+
     if (!backupCode.match(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/)) {
       setError('Format: XXXX-XXXX')
+      isSubmittingRef.current = false
       return
     }
 
     if (attemptCount >= maxAttempts) {
       setError(`Trop de tentatives. Veuillez réessayer dans 5 minutes.`)
+      isSubmittingRef.current = false
       return
     }
 
     if (!partialToken) {
       setError('Session 2FA invalide. Veuillez réessayer.')
+      isSubmittingRef.current = false
       return
     }
 
@@ -172,6 +190,7 @@ export default function TwoFALoginPage(): JSX.Element {
       setBackupCode('')
     } finally {
       setIsLoading(false)
+      isSubmittingRef.current = false
     }
   }
 

@@ -40,6 +40,8 @@ import type {
   LoginResponse,
   Verify2FARequest,
   Verify2FAResponse,
+  TOTPSetupResponse,
+  TOTPVerifyResponse,
   UserProfile as UserProfileType,
 } from '@/types/auth'
 import type { UserDashboardResponse, AdminDashboardResponse } from '@/types/dashboard'
@@ -336,6 +338,32 @@ export async function getSessions(): Promise<unknown> {
   return data
 }
 
+export async function forgotPassword(email: string): Promise<void> {
+  // POST /api/v1/auth/password-reset/request
+  // Initiates password reset flow (sends email with reset link)
+  await api.post('/api/v1/auth/password-reset/request', { email })
+}
+
+export async function resendPasswordReset(email: string): Promise<void> {
+  // POST /api/v1/auth/password-reset/request (resend)
+  // Resends password reset email if user requests it again
+  await api.post('/api/v1/auth/password-reset/request', { email })
+}
+
+export async function totpSetup(): Promise<TOTPSetupResponse> {
+  // POST /api/v1/auth/2fa/setup
+  // Initialize 2FA setup: returns QR code, secret, and backup codes
+  const { data } = await api.post<TOTPSetupResponse>('/api/v1/auth/2fa/setup')
+  return data
+}
+
+export async function totpVerify(code: string): Promise<TOTPVerifyResponse> {
+  // POST /api/v1/auth/2fa/verify
+  // Verify TOTP code and activate 2FA
+  const { data } = await api.post<TOTPVerifyResponse>('/api/v1/auth/2fa/verify', { code })
+  return data
+}
+
 // =============================================================================
 // DOCUMENTS
 // =============================================================================
@@ -458,10 +486,59 @@ export async function updateRole(
 // AUDIT
 // =============================================================================
 
-export async function getAuditLogs(params: Record<string, unknown> = {}): Promise<unknown> {
+export interface GetAuditLogsParams {
+  page: number
+  pageSize: number
+  action?: string
+  resourceType?: string
+  since?: string
+  until?: string
+  search?: string
+}
+
+export interface AuditLogItem {
+  id: string
+  tenant_id: string
+  user_id: string | null
+  action: string
+  resource_type: string
+  resource_id: string | null
+  status: string
+  reason: string | null
+  ip_address: string | null
+  user_agent: string | null
+  timestamp: string
+  hash: string | null
+  previous_hash: string | null
+  old_value: Record<string, any> | null
+  new_value: Record<string, any> | null
+  user_email: string | null
+  user_name: string | null
+}
+
+export interface AuditLogsResponse {
+  items: AuditLogItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export async function getAuditLogs(params: GetAuditLogsParams): Promise<AuditLogsResponse> {
   const tenantId = getTenantIdFromToken()
   if (!tenantId) throw new Error('Tenant ID not found in token')
-  const { data } = await api.get(`/api/v1/${tenantId}/audit`, { params })
+  
+  const queryParams = {
+    page: params.page,
+    page_size: params.pageSize,
+    ...(params.action && { action: params.action }),
+    ...(params.resourceType && { resource_type: params.resourceType }),
+    ...(params.since && { since: params.since }),
+    ...(params.until && { until: params.until }),
+    ...(params.search && { search: params.search }),
+  }
+  
+  const { data } = await api.get<AuditLogsResponse>(`/api/v1/${tenantId}/audit`, { params: queryParams })
   return data
 }
 

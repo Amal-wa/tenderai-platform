@@ -1,12 +1,22 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+export const dynamic = 'force-dynamic'
+
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, CheckCircle, AlertCircle, Mail, ArrowRight } from 'lucide-react'
 import AuthLeftPanel from '@/components/auth/AuthLeftPanel'
 import api, { extractErrorMessage } from '@/lib/api'
 
 export default function VerifyEmailPage(): JSX.Element {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0F1C35]" />}>
+      <VerifyEmailInner />
+    </Suspense>
+  )
+}
+
+function VerifyEmailInner(): JSX.Element {
   const router = useRouter()
   const searchParams = useSearchParams()
   const email = searchParams.get('email') || ''

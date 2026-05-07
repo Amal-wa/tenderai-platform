@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import re
+import redis
 import ipaddress
 from typing import Callable, Optional, Any
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from time import time
 from fastapi import Request, Depends
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response, JSONResponse
+from starlette.types import ASGIApp
 from sqlalchemy.orm import Session
 
 from ..models import AuthSession
@@ -487,13 +489,52 @@ def _log_request(request: Request, response: Response) -> None:
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
-    Placeholder middleware pour isolation multi-tenant (RLS).
+    Active le contexte tenant (RLS) pour les requêtes authentifiées.
     
-     Le vrai travail est dans la dépendance ensure_tenant_context() ci-bas.
+    Workflow:
+    1. Vérifie si la route est publique → passer sans RLS
+    2. Extrait tenant_id depuis request.state (posé par JWTAuthMiddleware)
+    3. Appelle set_tenant_context() pour SET LOCAL app.current_tenant
+    4. Marque request.state.tenant_context_set = True
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Placeholder — voir ensure_tenant_context() pour le vrai travail."""
+        path = request.url.path
+        
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+        
+        tenant_id = getattr(request.state, "tenant_id", None)
+        
+        if not tenant_id:
+            return await call_next(request)
+        
+        try:
+            if isinstance(tenant_id, str):
+                try:
+                    tenant_id_uuid = UUID(tenant_id)
+                except ValueError:
+                    logger.warning(f"Invalid tenant_id format: {tenant_id}")
+                    return await call_next(request)
+            else:
+                tenant_id_uuid = tenant_id
+            
+            from ..database import SessionLocal, set_tenant_context as _set_tenant_context
+            db = SessionLocal()
+            try:
+                _set_tenant_context(db, tenant_id_uuid)
+                request.state.tenant_context_set = True
+                logger.debug(
+                    f"RLS context set | tenant={tenant_id_uuid} | path={path}"
+                )
+            finally:
+                db.close()
+        
+        except Exception as e:
+            logger.warning(
+                f"Failed to set tenant context for {path}: {e}"
+            )
+        
         return await call_next(request)
 
 
@@ -557,6 +598,327 @@ async def ensure_tenant_context(
         )
         return None
 
+
+# ==============================================================================
+#  RATE LIMIT MIDDLEWARE — Layer 7 (Token Bucket via Redis Lua)
+# ==============================================================================
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Token Bucket rate limiting via Redis with Lua atomicity.
+
+    Limits:
+      - Authenticated (JWT): 100 tokens, refill 100 per 60s
+      - Anonymous (IP): 10 tokens, refill 10 per 60s
+
+    Identifier:
+      - Authenticated: user:{user_id} (decoded from JWT payload)
+      - Anonymous: ip:{client_ip} (from request.client.host or X-Forwarded-For)
+
+    Exempt paths: JWT_PUBLIC_PATHS frozenset (reused)
+
+    Response headers (on allowed):
+      - X-RateLimit-Remaining: int >= 0
+
+    Response (on limit exceeded):
+      - Status: 429
+      - Body: {"detail": "Rate limit exceeded", "code": "RATE_LIMIT_EXCEEDED"}
+      - Headers: X-RateLimit-Reset (Unix timestamp), X-RateLimit-Remaining (0),
+                 Retry-After (seconds)
+    """
+
+    REFILL_RATE = 60
+
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+        self.app_env = os.getenv("APP_ENV", "production")
+        if self.app_env == "development":
+            self.LIMIT_AUTHENTICATED = 300  # Relaxed for Next.js Fast Refresh
+            self.LIMIT_ANONYMOUS = 60
+        else:
+            self.LIMIT_AUTHENTICATED = 100
+            self.LIMIT_ANONYMOUS = 10
+
+    LUA_SCRIPT = """
+local key_tokens = KEYS[1]
+local key_last = KEYS[2]
+local limit = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+
+local tokens = tonumber(redis.call('GET', key_tokens))
+local last_refill = tonumber(redis.call('GET', key_last))
+
+if tokens == nil then
+  tokens = limit
+  last_refill = now
+else
+  if last_refill == nil then
+    last_refill = now
+  end
+  local elapsed = now - last_refill
+  local refill_amount = (elapsed / refill_rate) * limit
+  tokens = math.min(limit, tokens + refill_amount)
+  last_refill = now
+end
+
+if tokens >= 1 then
+  tokens = tokens - 1
+  redis.call('SETEX', key_tokens, 120, tostring(tokens))
+  redis.call('SETEX', key_last, 120, tostring(last_refill))
+  return {1, tokens}
+else
+  redis.call('SETEX', key_tokens, 120, tostring(tokens))
+  redis.call('SETEX', key_last, 120, tostring(last_refill))
+  return {0, 0}
+end
+"""
+
+    async def dispatch(
+        self, request: Request, call_next: Callable
+    ) -> Response:
+        path = request.url.path
+
+        if path in JWT_PUBLIC_PATHS:
+            return await call_next(request)
+
+        try:
+            identifier, is_authenticated = self._get_identifier(request)
+            limit = (
+                self.LIMIT_AUTHENTICATED
+                if is_authenticated
+                else self.LIMIT_ANONYMOUS
+            )
+
+            redis_client = _get_redis_client()
+            if not redis_client:
+                logger.debug("Redis unavailable — rate limit bypassed")
+                return await call_next(request)
+
+            allowed, remaining = self._check_rate_limit(
+                redis_client, identifier, limit
+            )
+
+            if not allowed:
+                reset_time = int(time()) + self.REFILL_RATE
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Rate limit exceeded",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                    },
+                    headers={
+                        "X-RateLimit-Reset": str(reset_time),
+                        "X-RateLimit-Remaining": "0",
+                        "Retry-After": str(self.REFILL_RATE),
+                    },
+                )
+
+            response = await call_next(request)
+
+            response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
+
+            return response
+
+        except Exception as e:
+            logger.warning(f"RateLimitMiddleware error: {e} — bypassing")
+            return await call_next(request)
+
+    def _get_identifier(self, request: Request) -> tuple[str, bool]:
+        """
+        Extract identifier (user_id or IP) and auth type.
+
+        Returns:
+            (identifier: str, is_authenticated: bool)
+        """
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            user_id = self._decode_jwt_user_id(token)
+            if user_id:
+                return f"user:{user_id}", True
+
+        client_ip = request.client.host if request.client else "unknown"
+        if "x-forwarded-for" in request.headers:
+            forwarded_for = request.headers["x-forwarded-for"]
+            first_ip = forwarded_for.split(",")[0].strip()
+            client_ip = first_ip
+
+        return f"ip:{client_ip}", False
+
+    def _decode_jwt_user_id(self, token: str) -> Optional[str]:
+        """
+        Decode JWT payload (no signature check) and return user_id.
+
+        Returns:
+            user_id (sub claim) or None if decoding fails
+        """
+        try:
+            parts = token.split(".")
+            if len(parts) != 3:
+                return None
+
+            payload_b64 = parts[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            return payload.get("sub")
+        except Exception:
+            return None
+
+    def _check_rate_limit(
+        self, redis_client: redis.Redis, identifier: str, limit: int
+    ) -> tuple[bool, int]:
+        """
+        Check rate limit using Token Bucket Lua script.
+
+        Returns:
+            (allowed: bool, remaining_tokens: int)
+        """
+        now = time()
+        key_tokens = f"ratelimit:{identifier}:tokens"
+        key_last = f"ratelimit:{identifier}:last"
+
+        try:
+            result = redis_client.eval(
+                self.LUA_SCRIPT,
+                2,
+                key_tokens,
+                key_last,
+                limit,
+                self.REFILL_RATE,
+                now,
+            )
+
+            allowed = result[0] == 1
+            remaining = max(0, int(result[1]))
+
+            if not allowed:
+                reset_time = int(now) + self.REFILL_RATE
+                logger.debug(
+                    f"Rate limit exceeded | identifier={identifier} | reset={reset_time}"
+                )
+
+            return allowed, remaining
+
+        except Exception as e:
+            logger.warning(f"Lua script execution failed: {e}")
+            return True, limit
+
+
+# ==============================================================================
+#  IDEMPOTENCY MIDDLEWARE
+# ==============================================================================
+
+class IdempotencyMiddleware(BaseHTTPMiddleware):
+    """
+    Garantit l'idempotence des requêtes POST/PUT/PATCH.
+    
+    Workflow:
+    1. Extrait le header Idempotency-Key (optionnel)
+    2. Si absent ou méthode GET → passe sans cacher
+    3. Si présent :
+       a. Cherche la réponse en cache Redis (clé: idempotency:{tenant_id}:{key})
+       b. Si trouvée → retourne la réponse cachée directement (status=200, X-Idempotent-Replayed: true)
+       c. Si absente → laisse passer, puis cache la réponse (si status < 500)
+    
+    Cache TTL: 24h (86400s)
+    Tenant isolation: Chaque tenant a son propre namespace de cache
+    """
+    
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.method not in {"POST", "PUT", "PATCH"}:
+            return await call_next(request)
+        
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if not idempotency_key:
+            return await call_next(request)
+        
+        tenant_id = getattr(request.state, "tenant_id", "anon")
+        redis_key = f"idempotency:{tenant_id}:{idempotency_key}"
+        
+        try:
+            redis_client = _get_redis_client()
+            if redis_client:
+                cached_response = redis_client.get(redis_key)
+                if cached_response:
+                    response_data = json.loads(cached_response)
+                    response = JSONResponse(
+                        status_code=response_data["status_code"],
+                        content=response_data["content"],
+                    )
+                    response.headers["X-Idempotent-Replayed"] = "true"
+                    logger.debug(
+                        f"Idempotency cache hit | key={idempotency_key} | tenant={tenant_id}"
+                    )
+                    return response
+        except Exception as e:
+            logger.warning(f"Idempotency cache lookup failed: {e}")
+        
+        response = await call_next(request)
+        
+        if response.status_code < 500:
+            try:
+                redis_client = _get_redis_client()
+                if redis_client:
+                    body_parts = []
+                    async for chunk in response.body_iterator:
+                        body_parts.append(chunk)
+                    
+                    body = b"".join(body_parts)
+                    
+                    if body:
+                        try:
+                            response_content = json.loads(body)
+                        except json.JSONDecodeError:
+                            response_content = {"body": body.decode("utf-8", errors="replace")}
+                    else:
+                        response_content = {}
+                    
+                    response_data = {
+                        "status_code": response.status_code,
+                        "content": response_content,
+                    }
+                    
+                    redis_client.setex(
+                        redis_key,
+                        86400,
+                        json.dumps(response_data),
+                    )
+                    
+                    response = JSONResponse(
+                        status_code=response.status_code,
+                        content=response_content,
+                    )
+                    for key, value in response.headers.items():
+                        response.headers[key] = value
+                    
+                    logger.debug(
+                        f"Idempotency cached | key={idempotency_key} | tenant={tenant_id} | status={response.status_code}"
+                    )
+            except Exception as e:
+                logger.warning(f"Idempotency caching failed: {e}")
+                return response
+        
+        return response
+
+
+def _get_redis_client() -> Optional[redis.Redis]:
+    """
+    Get Redis client for idempotency caching.
+    
+    Returns: redis.Redis instance or None if unavailable
+    """
+    try:
+        redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+        client = redis.from_url(redis_url, decode_responses=True)
+        client.ping()
+        return client
+    except Exception as e:
+        logger.debug(f"Redis not available for idempotency: {e}")
+        return None
 
 
 def update_session_last_used(db: Session, jti: str) -> None:

@@ -1,11 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+export const dynamic = 'force-dynamic'
+
+import { Suspense, useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { totpSetup, totpVerify, extractErrorMessage } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
 import AuthLeftPanel from '@/components/auth/AuthLeftPanel'
 import StepIndicator from '@/components/ui/StepIndicator'
 import OTPInput from '@/components/ui/OTPInput'
 import TOTPTimer from '@/components/ui/TOTPTimer'
+import { Download, Copy, AlertCircle } from 'lucide-react'
 
 type SetupStep = 'scan' | 'verify' | 'backup'
 
@@ -16,7 +21,17 @@ const steps = [
 ]
 
 export default function TwoFASetupPage(): JSX.Element {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0F1C35]" />}>
+      <TwoFASetupInner />
+    </Suspense>
+  )
+}
+
+function TwoFASetupInner(): JSX.Element {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const { user } = useAuth()
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<SetupStep>('scan')
@@ -41,12 +56,13 @@ export default function TwoFASetupPage(): JSX.Element {
       try {
         setIsLoading(true)
         setError(null)
-        // TODO: Call API endpoint to get QR code + secret
-        // For now, mock data
-        setQrCodeUrl('https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/TenderAI:test@example.com?secret=JBSWY3DP5OBTQ43U&issuer=TenderAI')
-        setSecret('JBSWY3DP5OBTQ43UJBSWY3DP')
+        // Call API endpoint to get QR code + secret
+        const response = await totpSetup()
+        setQrCodeUrl(response.qr_code)
+        setSecret(response.secret)
       } catch (err) {
-        setError('Impossible de charger le code QR. Veuillez réessayer.')
+        const msg = extractErrorMessage(err)
+        setError(msg || 'Impossible de charger le code QR. Veuillez réessayer.')
       } finally {
         setIsLoading(false)
       }
@@ -63,25 +79,15 @@ export default function TwoFASetupPage(): JSX.Element {
     try {
       setCodeError(null)
       setIsLoading(true)
-      // TODO: Call API to verify TOTP code and get backup codes
-      // For now, mock backup codes
-      await new Promise((r) => setTimeout(r, 500))
-      setBackupCodes([
-        'ABCD-1234',
-        'EFGH-5678',
-        'IJKL-9012',
-        'MNOP-3456',
-        'QRST-7890',
-        'UVWX-1234',
-        'YZAB-5678',
-        'CDEF-9012',
-        'GHIJ-3456',
-        'KLMN-7890',
-      ])
+      // Call API to verify TOTP code and get backup codes
+      // Add Idempotency-Key header for retry safety
+      const response = await totpVerify(code)
+      setBackupCodes(response.backup_codes || [])
       setCurrentStep('backup')
       setCode('')
     } catch (err) {
-      setCodeError('Code incorrect. Vérifiez l\'heure de votre téléphone.')
+      const msg = extractErrorMessage(err)
+      setCodeError(msg || 'Code incorrect. Vérifiez l\'heure de votre téléphone.')
     } finally {
       setIsLoading(false)
     }
@@ -103,16 +109,25 @@ export default function TwoFASetupPage(): JSX.Element {
   }
 
   // Get org name from AuthContext for dynamic messages
-  const orgName = 'votre organisation' // TODO: Import from AuthContext like in other pages
+  const orgName = user?.tenant_name || 'votre organisation'
 
   const handleFinish = async () => {
     try {
       setIsLoading(true)
-      // TODO: Call API to finalize 2FA setup
-      await new Promise((r) => setTimeout(r, 500))
-      router.push('/dashboard')
+      // Get redirect destination from ?next= parameter
+      // Validate it to prevent open redirect vulnerability
+      const nextParam = searchParams.get('next')
+      let redirectPath = '/dashboard'
+      
+      // Only allow relative paths that start with /dashboard or /login
+      if (nextParam && (nextParam.startsWith('/dashboard') || nextParam.startsWith('/login'))) {
+        redirectPath = nextParam
+      }
+      
+      router.push(redirectPath)
     } catch (err) {
-      setError('Erreur lors de la finalisation. Veuillez réessayer.')
+      const msg = extractErrorMessage(err)
+      setError(msg || 'Erreur lors de la finalisation. Veuillez réessayer.')
       setIsLoading(false)
     }
   }
@@ -142,12 +157,8 @@ export default function TwoFASetupPage(): JSX.Element {
 
           {/* Error alert */}
           {error && (
-            <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg text-xs text-danger flex items-start gap-2 mb-6">
-              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 12 12">
-                <circle cx="6" cy="6" r="5" fill="currentColor" opacity="0.2" />
-                <circle cx="6" cy="3.5" r="0.75" />
-                <path d="M6 5.5v2" stroke="currentColor" strokeWidth="0.75" strokeLinecap="round" />
-              </svg>
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start gap-2 mb-6">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               {error}
             </div>
           )}
@@ -290,19 +301,9 @@ export default function TwoFASetupPage(): JSX.Element {
               </div>
 
               {/* Warning box */}
-              <div className="flex gap-3 p-3 bg-amber/10 border border-amber/20 rounded-lg">
-                <svg
-                  className="w-5 h-5 flex-shrink-0 text-amber mt-0.5"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <p className="text-xs text-amber font-medium">
+              <div className="flex gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 text-amber-600 mt-0.5" />
+                <p className="text-xs text-amber-800 font-medium">
                   Si vous perdez accès à votre téléphone, ces codes sont votre seul moyen de récupérer votre
                   compte. {orgName} ne peut pas les récupérer pour vous.
                 </p>
@@ -312,15 +313,17 @@ export default function TwoFASetupPage(): JSX.Element {
               <div className="flex gap-2">
                 <button
                   onClick={downloadBackupCodes}
-                  className="flex-1 py-2.5 px-3 bg-white border border-navy text-navy font-medium rounded-lg hover:bg-navy/5 transition-colors text-sm"
+                  className="flex-1 py-2.5 px-3 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors text-sm flex items-center justify-center gap-2"
                 >
-                  ⬇ Télécharger
+                  <Download className="w-4 h-4" />
+                  Télécharger
                 </button>
                 <button
                   onClick={copyBackupCodes}
-                  className="flex-1 py-2.5 px-3 bg-white border border-navy text-navy font-medium rounded-lg hover:bg-navy/5 transition-colors text-sm"
+                  className="flex-1 py-2.5 px-3 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors text-sm flex items-center justify-center gap-2"
                 >
-                  📋 Copier
+                  <Copy className="w-4 h-4" />
+                  Copier
                 </button>
               </div>
 

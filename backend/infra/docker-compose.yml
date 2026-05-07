@@ -67,7 +67,9 @@ services:
       - tenderai_net
 
   api-gateway:
-    build: ../services/api-gateway
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
     container_name: tenderai-api
     ports:
       - "8000:8000"

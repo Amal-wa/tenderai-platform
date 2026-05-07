@@ -47,14 +47,7 @@ export interface TOTPSetupResponse {
 export interface TOTPVerifyResponse {
   message: string
   is_enabled: boolean
-}
-
-export interface TOTPDisableRequest {
-  password: string
-}
-
-export interface TOTPDisableResponse {
-  message: string
+  backup_codes?: string[]
 }
 
 export interface ErrorResponse {

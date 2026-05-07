@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
-  const AUTH_PAGES = ['/', '/login', '/register', '/forgot-password', '/2fa-setup', '/2fa-login', '/2fa-disable']
+  const AUTH_PAGES = ['/', '/login', '/register', '/forgot-password', '/2fa-setup', '/2fa-login']
 
   // ── Au chargement : recharger le profil si un token existe ─────────────────
   useEffect(() => {

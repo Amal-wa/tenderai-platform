@@ -112,9 +112,6 @@ def verify_invite_token(redis_client: redis.Redis, token: str) -> Optional[Tuple
         recipient_email = parts[1]
         role = parts[2]
         
-        # Delete immediately (single-use token)
-        redis_client.delete(key)
-        
         return inviter_id, recipient_email, role
     except (ValueError, IndexError) as e:
         logger.error(f"❌ Error parsing invite token: {e}")
@@ -130,7 +127,7 @@ def create_invitation_email(
     inviter_name: str,
     organization_name: str,
     invite_token: str,
-    frontend_url: str = "https://tenderai.io"
+    frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
 ) -> Tuple[str, str]:
     """
     Build invitation email subject and HTML body
@@ -138,7 +135,7 @@ def create_invitation_email(
     Returns:
         Tuple of (subject, html_body)
     """
-    accept_link = f"{frontend_url}/auth/invite/accept?token={invite_token}"
+    accept_link = f"{frontend_url}/invite/accept?token={invite_token}"
     
     subject = f"Vous êtes invité à rejoindre {organization_name} sur TenderAI"
     html_body = f"""
@@ -203,7 +200,8 @@ def create_invitation_email_job(
     tenant_id: UUID,
     inviter_name: str,
     organization_name: str,
-    invite_token: str
+    invite_token: str,
+    frontend_url: str | None = None
 ) -> EmailJob:
     """
     Create an EmailJob record for invitation email
@@ -212,7 +210,8 @@ def create_invitation_email_job(
         recipient_email=recipient_email,
         inviter_name=inviter_name,
         organization_name=organization_name,
-        invite_token=invite_token
+        invite_token=invite_token,
+        frontend_url=frontend_url or os.getenv("FRONTEND_URL", "http://localhost:3000")
     )
     
     email_job = EmailJob(
@@ -243,7 +242,8 @@ def send_user_invitation(
     tenant_id: UUID,
     inviter_name: str,
     organization_name: str,
-    role: str = "user"
+    role: str = "user",
+    frontend_url: str | None = None
 ) -> Tuple[bool, str]:
     """
     Send a user invitation (P0 feature)
@@ -256,6 +256,7 @@ def send_user_invitation(
         inviter_name: Name of inviter (for email)
         organization_name: Organization name (for email)
         role: Role for new user
+        frontend_url: Frontend base URL for invitation link (overrides env var)
     
     Returns:
         Tuple of (success: bool, invite_token: str or error_message: str)
@@ -281,7 +282,8 @@ def send_user_invitation(
             tenant_id=tenant_id,
             inviter_name=inviter_name,
             organization_name=organization_name,
-            invite_token=invite_token
+            invite_token=invite_token,
+            frontend_url=frontend_url
         )
         
         db.commit()
@@ -307,7 +309,7 @@ def accept_user_invitation(
     token: str,
     full_name: str,
     password: str
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, UUID | None]:
     """
     Accept a user invitation and create account (P0 feature)
     
@@ -325,11 +327,11 @@ def accept_user_invitation(
         password: New user's password
     
     Returns:
-        Tuple of (success: bool, message: str)
+        Tuple of (success: bool, message: str, user_id: UUID | None)
     """
     redis_client = _get_redis_client()
     if not redis_client:
-        return False, "Service temporarily unavailable"
+        return False, "Service temporarily unavailable", None
     
     try:
         from ..models import Tenant, Role
@@ -338,7 +340,7 @@ def accept_user_invitation(
         result = verify_invite_token(redis_client, token)
         if not result:
             logger.warning(f"⚠️ Invalid invitation token")
-            return False, "Invalid or expired invitation token"
+            return False, "Invalid or expired invitation token", None
         
         inviter_id, recipient_email, role_name = result
         recipient_email = recipient_email.lower()
@@ -347,13 +349,13 @@ def accept_user_invitation(
         existing_user = db.query(User).filter(User.email == recipient_email).first()
         if existing_user:
             logger.warning(f"⚠️ User already exists | email={recipient_email}")
-            return False, "Account already exists for this email"
+            return False, "Account already exists for this email", None
         
         # Get inviter to retrieve tenant_id
         inviter = db.query(User).filter(User.id == inviter_id).first()
         if not inviter:
             logger.warning(f"⚠️ Inviter not found | inviter_id={inviter_id}")
-            return False, "Invitation is no longer valid"
+            return False, "Invitation is no longer valid", None
         
         tenant_id = inviter.tenant_id
         
@@ -374,7 +376,7 @@ def accept_user_invitation(
             ).first()
         
         if not role:
-            return False, "Role configuration error"
+            return False, "Role configuration error", None
         
         # Create new user
         new_user = User(
@@ -383,19 +385,21 @@ def accept_user_invitation(
             hashed_password=get_password_hash(password),
             tenant_id=tenant_id,
             role_id=role.id,
-            is_active=True,
-            invited_by=inviter_id  # Track who invited
+            is_active=True
         )
         
         db.add(new_user)
         db.commit()
+        
+        # Token deleted AFTER TOTP activation (see routers/totp.py verify_2fa)
+        # Store pending invitation token marker for later cleanup
         
         logger.info(
             f"✅ User invitation accepted | new_user={new_user.id} | "
             f"email={recipient_email} | role={role_name}"
         )
         
-        return True, "Account created successfully"
+        return True, "Account created successfully", new_user.id
     
     except Exception as e:
         db.rollback()
@@ -403,4 +407,4 @@ def accept_user_invitation(
             f"❌ Error accepting invitation | token={token[:10]}... | error={str(e)}",
             exc_info=True
         )
-        return False, "An error occurred while accepting the invitation"
+        return False, "An error occurred while accepting the invitation", None

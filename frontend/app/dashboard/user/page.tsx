@@ -6,7 +6,7 @@ import {
   SlidersHorizontal, ChevronDown
 } from 'lucide-react'
 import { extractErrorMessage, getDashboard } from '@/lib/api'
-import type { UserDashboardResponse } from '@/types/dashboard'
+import type { UserDashboardResponse, DocumentResponse } from '@/types/dashboard'
 
 // Types
 type StatusType = 'todos' | 'brouillon' | 'soumis' | 'analyse' | 'gagne' | 'perdu'
@@ -45,29 +45,6 @@ interface StatItem {
   iconColor: string
   valColor?: string
 }
-
-// MOCK data
-const mockAOs: AOItem[] = [
-  {
-    id: 1,
-    sector: 'Informatique & SI',
-    title: 'Min. Éducation — Fournitures informatiques',
-    client: 'Ministère de l\'Éducation',
-    status: 'soumis',
-    statusLabel: 'Soumis',
-    conformite: 87,
-    conformiteColor: 'amber',
-    meta: [
-      { val: 'J−4', label: 'Échéance', color: 'danger' },
-      { val: '8', label: 'Documents', color: 'default' },
-      { val: '480 K', label: 'TND estimé', color: 'default' },
-    ],
-    footerLeft: 'Soumis le 10 avr.',
-    actionLabel: 'Voir le dossier',
-    actionVariant: 'primary',
-    borderColor: '#378ADD',
-  },
-]
 
 // ──────────────────────────────────────────────────────────────────
 // TOPBAR COMPONENT
@@ -414,14 +391,34 @@ export default function UserPage(): React.ReactElement {
 
             {dashboardData.my_documents && dashboardData.my_documents.length > 0 ? (
               <div className="grid grid-cols-3 gap-4">
-                {mockAOs.map((ao) => (
-                  <AOCard key={ao.id} ao={ao} />
-                ))}
+                {dashboardData.my_documents.map((doc: DocumentResponse) => {
+                  const metadata = doc.document_metadata || {}
+                  const ao: AOItem = {
+                    id: parseInt(doc.id) || 0,
+                    sector: (metadata.sector as string) || 'Autres',
+                    title: doc.filename || 'Sans titre',
+                    client: (metadata.client as string) || 'N/A',
+                    status: (doc.status as StatusType) || 'brouillon',
+                    statusLabel: (metadata.status_label as string) || 'Brouillon',
+                    conformite: (metadata.compliance_score as number) || 0,
+                    conformiteColor: (metadata.compliance_score as number) ? ((metadata.compliance_score as number) >= 80 ? 'success' : (metadata.compliance_score as number) >= 60 ? 'amber' : 'danger') : 'neutral',
+                    meta: [
+                      { val: metadata.deadline ? `J−${Math.max(0, Math.ceil((new Date(metadata.deadline as string).getTime() - Date.now()) / 86400000))}` : 'N/A', label: 'Échéance', color: 'danger' },
+                      { val: String((metadata.document_count as number) || 0), label: 'Documents', color: 'default' },
+                      { val: metadata.budget_eur ? `€${Math.round((metadata.budget_eur as number) / 1000)}K` : 'N/A', label: 'Budget', color: 'default' },
+                    ],
+                    footerLeft: doc.created_at ? `Créé le ${new Date(doc.created_at).toLocaleDateString('fr-FR')}` : undefined,
+                    actionLabel: 'Voir le dossier',
+                    actionVariant: 'primary',
+                    borderColor: '#378ADD',
+                  }
+                  return <AOCard key={doc.id} ao={ao} />
+                })}
               </div>
             ) : (
               <div className="bg-white rounded-lg p-12 text-center border border-[#E5E0D8]">
                 <FileText size={48} className="mx-auto text-[#9B9590] opacity-40 mb-4" />
-                <p className="text-[#9B9590] font-medium">Aucun appel d'offres pour le moment</p>
+                <p className="text-[#9B9590] font-medium">Aucun appel d'offres disponible</p>
               </div>
             )}
           </>

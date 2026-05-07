@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
+import { login, extractErrorMessage } from '@/lib/api'
 import TenderAILogo from '@/components/ui/TenderAILogo'
 import {
   Mail,
@@ -18,6 +20,7 @@ interface LoginFormProps {
 }
 
 export default function LoginForm({ onSuccess }: LoginFormProps) {
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -35,21 +38,22 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
 
     setIsLoading(true)
     try {
-      // TODO: Replace with actual API call
-      // For now, simulate API delay
-      await new Promise((r) => setTimeout(r, 1500))
+      // Call actual login API
+      const response = await login(email, password)
 
-      // Mock validation - reject invalid emails
-      if (!email.includes('@')) {
-        setError('Adresse email invalide')
-        setIsLoading(false)
+      // Check if 2FA is required
+      if (response.requires_2fa && response.partial_token) {
+        // Store partial token and redirect to 2FA verification page
+        sessionStorage.setItem('partial_token', response.partial_token)
+        router.push('/2fa-login')
         return
       }
 
-      setIsLoading(false)
+      // No 2FA required, login successful
       onSuccess()
     } catch (err) {
-      setError('Erreur lors de la connexion. Veuillez réessayer.')
+      const msg = extractErrorMessage(err)
+      setError(msg)
       setIsLoading(false)
     }
   }

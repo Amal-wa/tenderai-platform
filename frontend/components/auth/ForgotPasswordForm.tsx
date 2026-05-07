@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { forgotPassword, resendPasswordReset, extractErrorMessage } from '@/lib/api'
 import { Mail, KeyRound, Info, ArrowLeft } from 'lucide-react'
 
 export default function ForgotPasswordForm() {
   const [step, setStep] = useState<'email' | 'sent'>('email')
   const [email, setEmail] = useState('')
+  const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
 
@@ -25,27 +27,31 @@ export default function ForgotPasswordForm() {
     }
 
     setIsLoading(true)
+    setError('')
 
     try {
-      // TODO: Replace with actual API call
-      await new Promise((r) => setTimeout(r, 1500))
+      await forgotPassword(email)
       setStep('sent')
       setResendCooldown(60)
-      setIsLoading(false)
     } catch (err) {
+      const msg = extractErrorMessage(err)
+      setError(msg)
+    } finally {
       setIsLoading(false)
     }
   }
 
   const handleResend = async () => {
     setIsLoading(true)
+    setError('')
 
     try {
-      // TODO: Replace with actual API call
-      await new Promise((r) => setTimeout(r, 1500))
+      await resendPasswordReset(email)
       setResendCooldown(60)
-      setIsLoading(false)
     } catch (err) {
+      const msg = extractErrorMessage(err)
+      setError(msg)
+    } finally {
       setIsLoading(false)
     }
   }
@@ -102,6 +108,18 @@ export default function ForgotPasswordForm() {
               />
             </div>
           </div>
+
+          {/* Error Message */}
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5 mt-3"
+            >
+              <Info className="w-3.5 h-3.5 shrink-0" />
+              <span>{error}</span>
+            </motion.div>
+          )}
 
           {/* Submit Button */}
           <button
