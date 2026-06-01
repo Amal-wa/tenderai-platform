@@ -139,16 +139,13 @@ function AcceptInvitationInner(): JSX.Element {
       setIsLoading(true)
       setApiError(null)
 
-      // Call backend accept endpoint
       await api.post('/api/v1/auth/invite/accept', {
         token,
         full_name: data.full_name,
         password: data.password,
       })
 
-      // Success — redirect to 2FA setup
-        router.push('/2fa-setup?next=/login&message=please_setup_2fa')
-      
+      router.push('/register/setup-2fa')
     } catch (err: any) {
       const errorMessage = extractErrorMessage(err)
       setApiError(errorMessage)

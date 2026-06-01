@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useAuth } from '@/context/AuthContext'
 import type { HeroData } from '@/lib/admin/analytics'
 
 interface HeroBannerProps {
@@ -7,9 +8,13 @@ interface HeroBannerProps {
 }
 
 export default function HeroBanner({ hero }: HeroBannerProps): React.ReactElement {
+  const { user } = useAuth()
   const [aosCount, setAosCount] = useState(0)
   const [winRateCount, setWinRateCount] = useState(0)
   const [conformiteCount, setConformiteCount] = useState(0)
+
+  // Extract first name from full_name
+  const firstName = user?.full_name?.split(' ')[0] || 'Utilisateur'
 
   useEffect(() => {
     let frameId: number
@@ -46,7 +51,7 @@ export default function HeroBanner({ hero }: HeroBannerProps): React.ReactElemen
 
       {/* Left Content */}
       <div>
-        <p className="text-[13px] text-white/45 mb-1">Bonjour, Amel 👋</p>
+        <p className="text-[13px] text-white/45 mb-1">Bonjour, {firstName} 👋</p>
         <h2 className="font-heading text-[26px] font-black text-white leading-tight mb-4">
           Performance{' '}
           <span className="text-[var(--amber-xl)]">au-dessus du marché</span>

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { AlertTriangle } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { AlertTriangle, CheckCircle } from 'lucide-react'
 import TenderAILogo from '@/components/ui/TenderAILogo'
 import { login, extractErrorMessage } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
@@ -11,6 +11,7 @@ import type { LoginResponse } from '@/types/auth'
 
 export default function LoginPageClient() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { finalizeLogin } = useAuth()
 
   // Form state
@@ -19,11 +20,19 @@ export default function LoginPageClient() {
   const [error, setError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showSuccess, setShowSuccess] = useState(false)
 
   // 429 rate limit countdown
   const [rateLimitReset, setRateLimitReset] = useState<number | null>(null)
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0)
   const [loginDisabled, setLoginDisabled] = useState(false)
+
+  // Check for account creation success message
+  useEffect(() => {
+    if (searchParams.get('message') === 'account_ready') {
+      setShowSuccess(true)
+    }
+  }, [searchParams])
 
   // Countdown timer for 429 rate limit
   useEffect(() => {
@@ -197,6 +206,21 @@ export default function LoginPageClient() {
             <h1 className="font-heading text-2xl font-bold text-[#0F1C35] mb-1">Bon retour</h1>
             <p className="text-sm text-[#6B6560]">Connectez-vous à votre espace</p>
           </div>
+
+          {/* Success Banner — Account Created */}
+          {showSuccess && (
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-green-900 mb-0.5">
+                  Votre compte a été créé avec succès
+                </p>
+                <p className="text-xs text-green-700">
+                  Connectez-vous pour accéder à votre espace.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Form */}
           <form className="space-y-5" onSubmit={handleLoginSubmit}>

@@ -59,6 +59,7 @@ export default function Sidebar() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [logoVersion, setLogoVersion] = useState<number>(Date.now())
 
   // Fetch tenant info on mount
   useEffect(() => {
@@ -76,6 +77,15 @@ export default function Sidebar() {
     }
     
     loadTenantInfo()
+  }, [])
+
+  // Listen for logo update events
+  useEffect(() => {
+    const handler = () => {
+      setLogoVersion(Date.now())
+    }
+    window.addEventListener('tenant-logo-updated', handler)
+    return () => window.removeEventListener('tenant-logo-updated', handler)
   }, [])
 
   // Get logo URL from tenant metadata
@@ -141,29 +151,34 @@ export default function Sidebar() {
 
       {/* Tenant block */}
       <div 
-        className="mx-3 mt-3 p-2.5 bg-white/[0.05] border border-white/[0.08] rounded-lg 
-          flex items-center gap-2.5 group relative"
+        className="mx-3 mt-3 h-40 p-3 bg-white/[0.05] border border-white/[0.08] rounded-lg 
+          flex flex-col items-center justify-center gap-3 group relative overflow-hidden"
       >
         {/* Logo or Avatar */}
         {logoUrl && !loading ? (
-          <img 
-            src={logoUrl} 
-            alt={tenantName}
-            className="w-7 h-7 rounded-lg object-contain flex-shrink-0 bg-white/[0.05]"
-          />
+          <div className="h-28 w-full flex-shrink-0 overflow-hidden rounded-lg flex items-center justify-center">
+            <img 
+              src={`${logoUrl}?v=${logoVersion}`}
+              alt={tenantName}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none'
+              }}
+              className="w-full h-full object-contain"
+            />
+          </div>
         ) : (
           <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0
-              text-[10px] font-bold text-white"
+            className="h-28 w-28 rounded-lg flex items-center justify-center flex-shrink-0
+              text-lg font-bold text-white"
             style={{ background: 'linear-gradient(135deg, #C4962A, #9a6e1a)' }}
           >
             {tenantName?.[0]?.toUpperCase() || 'T'}
           </div>
         )}
         
-        <div className="min-w-0">
-          <div className="text-[12px] font-medium text-white/90 truncate">{tenantName}</div>
-          <div className="text-[9px] font-semibold font-mono text-gold bg-gold/[0.15] px-1.5 py-0.5 rounded-full w-fit mt-0.5">
+        <div className="text-center">
+          <div className="text-sm font-medium text-white/90 truncate">{tenantName}</div>
+          <div className="text-[10px] font-semibold font-mono text-gold bg-gold/[0.15] px-2 py-0.5 rounded-full w-fit mx-auto mt-1">
             ◆ {tenantInfo?.subscription_plan || 'Pro'}
           </div>
         </div>
@@ -175,11 +190,11 @@ export default function Sidebar() {
             whileTap={{ scale: 0.95 }}
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="opacity-0 group-hover:opacity-100 transition-opacity ml-auto flex-shrink-0
+            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity
               text-white/40 hover:text-white/70 disabled:opacity-50 cursor-pointer"
             title="Changer le logo"
           >
-            <Upload className="w-3.5 h-3.5" />
+            <Upload className="w-4 h-4" />
           </motion.button>
         )}
 

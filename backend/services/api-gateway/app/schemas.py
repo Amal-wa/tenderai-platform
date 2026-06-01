@@ -690,7 +690,7 @@ class TeamActivityItem(BaseModel):
 class LastAnalysisItem(BaseModel):
     """Last compliance analysis result (user dashboard)."""
     document: DocumentResponse = Field(..., description="Document analysé")
-    report: "ComplianceReportResponse" = Field(..., description="Rapport de conformité")
+    report: ComplianceReportResponse = Field(..., description="Rapport de conformité")
 
 
 class AdminDashboardResponse(BaseModel):

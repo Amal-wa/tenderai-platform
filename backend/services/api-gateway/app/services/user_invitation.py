@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..models import User, EmailJob, EmailJobType, EmailJobStatus
 from ..auth import get_password_hash
 from ..database import set_tenant_context
+from ..models.user_totp import UserTOTP
 
 logger = logging.getLogger(__name__)
 
@@ -346,11 +347,29 @@ def accept_user_invitation(
         recipient_email = recipient_email.lower()
         
         # Check if user already exists
-        existing_user = db.query(User).filter(User.email == recipient_email).first()
+        existing_user = db.query(User).filter(
+            User.email == recipient_email
+        ).first()
+
         if existing_user:
-            logger.warning(f"⚠️ User already exists | email={recipient_email}")
-            return False, "Account already exists for this email", None
-        
+            if not existing_user.is_deleted:
+                logger.warning(f"⚠️ User already exists | email={recipient_email}")
+                return False, "Account already exists for this email", None
+            else:
+                db.query(UserTOTP).filter(
+                    UserTOTP.user_id == existing_user.id
+                ).delete(synchronize_session=False)
+                existing_user.is_deleted = False
+                existing_user.is_active = True
+                existing_user.full_name = full_name
+                existing_user.hashed_password = get_password_hash(password)
+                existing_user.email_verified = True
+                existing_user.last_login_at = None
+                db.commit()
+                db.refresh(existing_user)
+                logger.info(f"✅ Reactivated | email={recipient_email}")
+                return True, "Account reactivated successfully", existing_user.id
+            
         # Get inviter to retrieve tenant_id
         inviter = db.query(User).filter(User.id == inviter_id).first()
         if not inviter:
@@ -379,13 +398,24 @@ def accept_user_invitation(
             return False, "Role configuration error", None
         
         # Create new user
+        # Nettoyage défensif — UserTOTP orphelins par email
+        orphan_user = db.query(User).filter(
+            User.email == recipient_email
+        ).first()
+        if orphan_user:
+            db.query(UserTOTP).filter(
+                UserTOTP.user_id == orphan_user.id
+            ).delete(synchronize_session=False)
+            db.commit()
+        
         new_user = User(
             email=recipient_email,
             full_name=full_name,
             hashed_password=get_password_hash(password),
             tenant_id=tenant_id,
             role_id=role.id,
-            is_active=True
+            is_active=True,
+            email_verified=True
         )
         
         db.add(new_user)

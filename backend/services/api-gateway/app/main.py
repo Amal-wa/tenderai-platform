@@ -49,7 +49,7 @@ from .schemas import (
     AnalyseStatsResponse, AnalyseRequestSchema, AnalyseResultResponse, AnalyseHistoryItemResponse
 )
 from .security import (
-    create_access_token, create_refresh_token,
+    create_access_token, create_refresh_token, create_partial_token,
 )
 from .security.cookies import set_auth_cookies, delete_auth_cookies, IS_PRODUCTION
 from .auth import (
@@ -61,6 +61,7 @@ from .auth import (
 )
 from .database import get_db
 from .storage import minio_client
+from minio.error import S3Error
 from .audit_service import log_action
 from .core.ratelimit import check_rate_limit, get_client_ip, record_login_attempt
 from .core.dependencies import (
@@ -2195,7 +2196,8 @@ async def invite_user(
     # Prevent duplicate invitations
     existing_user = db.query(User).filter(
         User.email == body.email.lower(),
-        User.tenant_id == current_user.tenant_id
+        User.tenant_id == current_user.tenant_id,
+        User.is_deleted == False  # noqa: E712
     ).first()
     
     if existing_user:
@@ -2256,6 +2258,7 @@ async def invite_user(
 )
 async def accept_invitation(
     body: AcceptInvitationRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
     """
@@ -2304,27 +2307,87 @@ async def accept_invitation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=message
             )
-        
-        # Store pending invitation token for deletion after TOTP setup
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to load newly created user"
+            )
+
+        access_token_data: Dict[str, Any] = {
+            "sub": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "email": user.email,
+        }
+        access_token: str = create_access_token(
+            data=access_token_data,
+            expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        )
+        refresh_token: str = create_refresh_token(
+            data=access_token_data,
+            expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        )
+
+        try:
+            from .security.auth.jwt_handler import get_jwt_handler
+            jwt_handler = get_jwt_handler()
+
+            access_payload = jwt_handler.verify_token(access_token)
+            access_jti = access_payload.get("jti")
+            if access_jti:
+                create_auth_session(
+                    db=db,
+                    user_id=user.id,
+                    tenant_id=user.tenant_id,
+                    jti=access_jti,
+                    token_type="access",
+                    expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+                    ip_address=get_client_ip(request),
+                    user_agent=request.headers.get("user-agent"),
+                )
+
+            refresh_payload = jwt_handler.verify_token(refresh_token)
+            refresh_jti = refresh_payload.get("jti")
+            if refresh_jti:
+                create_auth_session(
+                    db=db,
+                    user_id=user.id,
+                    tenant_id=user.tenant_id,
+                    jti=refresh_jti,
+                    token_type="refresh",
+                    expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+                    ip_address=get_client_ip(request),
+                    user_agent=request.headers.get("user-agent"),
+                )
+
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to register auth sessions | error={str(e)}")
+
+        response = JSONResponse(
+            status_code=201,
+            content={
+                "status": "success",
+                "message": message,
+                "requires_2fa_setup": True,
+            }
+        )
+        set_auth_cookies(response, access_token, refresh_token)
+
         if user_id:
             try:
                 redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
                 redis_client = redis.from_url(redis_url, decode_responses=True)
                 redis_client.setex(
                     f"invite_pending_2fa:{user_id}",
-                    3600,  # 1 hour TTL
+                    3600,
                     body.token
                 )
-                logger.debug(f"✅ Stored pending invitation token | user={user_id}")
             except Exception as e:
-                logger.warning(f"⚠️ Failed to store pending token | error={str(e)}")
-                # Continue anyway - token will be cleaned up on TOTP or after 7 days
-        
-        return {
-            "status": "success",
-            "message": message
-        }
-    
+                logger.warning(f"Failed to store pending token | error={str(e)}")
+
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -3157,8 +3220,11 @@ async def get_current_tenant(
     
     metadata = dict(tenant.tenant_metadata or {})
     if metadata.get("logo_path"):
-        # Return API proxy URL instead of MinIO presigned URL (avoids CORS issues)
-        metadata["logo_url"] = "/api/v1/me/tenant/logo/image"
+        # Return API proxy URL with hash query param to bypass browser cache
+        # Each tenant gets unique URL based on logo_path
+        logo_path = metadata["logo_path"]
+        logo_hash = hashlib.md5(logo_path.encode()).hexdigest()[:8]
+        metadata["logo_url"] = f"/api/v1/me/tenant/logo/image?v={logo_hash}"
     
     tenant_dict = TenantResponse.model_validate(tenant).model_dump()
     tenant_dict["tenant_metadata"] = metadata
@@ -3290,8 +3356,10 @@ async def upload_tenant_logo(
         }
         db.commit()
         
-        # Use API proxy URL instead of MinIO presigned URL (avoids CORS issues)
-        logo_url = "/api/v1/me/tenant/logo/image"
+        # Use API proxy URL with hash query param to bypass browser cache
+        logo_path = upload_result["storage_path"]
+        logo_hash = hashlib.md5(logo_path.encode()).hexdigest()[:8]
+        logo_url = f"/api/v1/me/tenant/logo/image?v={logo_hash}"
         
         # Log action
         log_action(
@@ -3365,13 +3433,37 @@ async def get_tenant_logo_image(
                 media_type=content_type,
                 headers={
                     "Content-Disposition": f"inline; filename={logo_path.split('/')[-1]}",
-                    "Cache-Control": "public, max-age=3600",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
                     "Access-Control-Allow-Origin": "*",
                 }
             )
+        except S3Error as e:
+            if e.code == "NoSuchKey":
+                try:
+                    metadata = tenant.tenant_metadata or {}
+                    metadata.pop("logo_path", None)
+                    metadata.pop("logo_url", None)
+                    tenant.tenant_metadata = metadata
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                raise HTTPException(
+                    status_code=404,
+                    detail="Aucun logo configuré pour ce tenant"
+                )
+            logger.error(f"❌ MinIO S3Error retrieving logo: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail="Erreur accès stockage objet"
+            )
         except Exception as e:
-            logger.error(f"❌ Error retrieving logo from MinIO: {e}")
-            raise HTTPException(status_code=500, detail="Error retrieving logo")
+            logger.error(f"❌ Unexpected error retrieving logo: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Erreur interne lors de la récupération du logo"
+            )
             
     except HTTPException:
         raise
@@ -3894,6 +3986,7 @@ async def delete_user(
     # Soft delete
     now = datetime.now(timezone.utc)
     user.is_deleted = True
+    user.is_active = False
     user.updated_at = now
     
     

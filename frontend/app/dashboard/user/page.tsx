@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   Plus, Bell, FileText, Clock, TrendingUp, ShieldCheck, AlertTriangle,
@@ -9,8 +10,16 @@ import { extractErrorMessage, getDashboard } from '@/lib/api'
 import type { UserDashboardResponse, DocumentResponse } from '@/types/dashboard'
 
 // Types
-type StatusType = 'todos' | 'brouillon' | 'soumis' | 'analyse' | 'gagne' | 'perdu'
+type StatusType = 'uploaded' | 'ready' | 'processing' | 'error'
 type ColorType = 'default' | 'danger' | 'amber' | 'success' | 'neutral'
+
+const STATUS_MAP: Record<string, StatusType> = {
+  'Brouillon': 'uploaded',
+  'Soumis': 'ready',
+  'En analyse': 'processing',
+  'Gagné': 'ready',
+  'Perdu': 'error',
+}
 
 interface MetaChip {
   val: string
@@ -32,8 +41,6 @@ interface AOItem {
   footerVal?: string
   footerValColor?: ColorType
   footerWarn?: string
-  actionLabel: string
-  actionVariant: 'primary' | 'secondary' | 'success' | 'danger'
   borderColor: string
 }
 
@@ -53,9 +60,10 @@ interface StatItem {
 interface TopbarProps {
   userName: string
   notificationCount: number
+  onSubmitClick: () => void
 }
 
-function Topbar({ userName, notificationCount }: TopbarProps): React.ReactElement {
+function Topbar({ userName, notificationCount, onSubmitClick }: TopbarProps): React.ReactElement {
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -71,17 +79,17 @@ function Topbar({ userName, notificationCount }: TopbarProps): React.ReactElemen
       </div>
 
       <div className="flex gap-[10px] items-center">
-        <button className="flex items-center gap-[6px] bg-[#C4962A] text-[#0F1C35] text-xs font-bold px-[14px] py-[7px] rounded-lg hover:bg-[#d4a93c] transition">
+        <button onClick={onSubmitClick} className="flex items-center gap-[6px] bg-[#C4962A] text-[#0F1C35] text-xs font-bold px-[14px] py-[7px] rounded-lg hover:bg-[#d4a93c] transition">
           <Plus size={14} />
           Soumettre un AO
         </button>
 
-        <button className="relative w-8 h-8 bg-[#F5F3EE] border border-[#E5E0D8] rounded-full flex items-center justify-center hover:bg-[#EDE9E2] transition">
+        <div className="relative w-8 h-8 bg-[#F5F3EE] border border-[#E5E0D8] rounded-full flex items-center justify-center">
           <Bell size={15} className="text-[#6B6560]" />
           {notificationCount > 0 && (
             <span className="absolute top-[3px] right-[3px] w-2 h-2 bg-[#E24B4A] border-2 border-white rounded-full" />
           )}
-        </button>
+        </div>
 
         <div className="flex items-center gap-[7px] bg-[#F5F3EE] border border-[#E5E0D8] rounded-full py-1 pl-1 pr-[10px]">
           <div className="w-6 h-6 bg-[#C4962A] rounded-full flex items-center justify-center flex-shrink-0">
@@ -143,16 +151,6 @@ function AOCard({ ao }: AOCardProps): React.ReactElement {
     }
   }
 
-  const getActionBtnClasses = (variant: 'primary' | 'secondary' | 'success' | 'danger'): string => {
-    switch (variant) {
-      case 'primary': return 'bg-[#378ADD] text-white hover:bg-[#2970c2]'
-      case 'secondary': return 'bg-[#F5F3EE] text-[#6B6560] border border-[#E5E0D8] hover:bg-[#EDE9E2]'
-      case 'success': return 'bg-[#1D9E75] text-white hover:bg-[#178b64]'
-      case 'danger': return 'bg-[#E24B4A] text-white hover:bg-[#d43f3e]'
-      default: return ''
-    }
-  }
-
   return (
     <motion.div
       layoutId={`ao-${ao.id}`}
@@ -173,12 +171,12 @@ function AOCard({ ao }: AOCardProps): React.ReactElement {
         </div>
         <span
           className={`text-[9px] font-bold px-2 py-1 rounded-full whitespace-nowrap ms-2 ${
-            ao.status === 'gagne'
+            ao.status === 'ready'
               ? 'bg-[#1D9E75] text-white'
-              : ao.status === 'perdu' || ao.status === 'analyse'
+              : ao.status === 'error' || ao.status === 'processing'
                 ? 'bg-[#E24B4A] text-white'
-                : ao.status === 'soumis'
-                  ? 'bg-[#378ADD] text-white'
+                : ao.status === 'uploaded'
+                  ? 'bg-[#E5E0D8] text-[#6B6560]'
                   : 'bg-[#E5E0D8] text-[#6B6560]'
           }`}
         >
@@ -233,10 +231,6 @@ function AOCard({ ao }: AOCardProps): React.ReactElement {
             </>
           )}
         </div>
-
-        <button className={`text-[11px] font-bold px-3 py-[5px] rounded-[7px] transition ${getActionBtnClasses(ao.actionVariant)}`}>
-          {ao.actionLabel}
-        </button>
       </div>
     </motion.div>
   )
@@ -247,10 +241,12 @@ function AOCard({ ao }: AOCardProps): React.ReactElement {
 // ──────────────────────────────────────────────────────────────────
 
 export default function UserPage(): React.ReactElement {
+  const router = useRouter()
   const [dashboardData, setDashboardData] = useState<UserDashboardResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeFilter, setActiveFilter] = useState('Tous')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -309,17 +305,21 @@ export default function UserPage(): React.ReactElement {
 
   const filterOptions = [
     { label: 'Tous', count: dashboardData?.my_documents?.length ?? 0 },
-    { label: 'Brouillon', count: 2 },
-    { label: 'Soumis', count: 1 },
-    { label: 'En analyse', count: 1 },
-    { label: 'Gagné', count: 1 },
-    { label: 'Perdu', count: 1 },
+    { label: 'Brouillon', count: dashboardData?.my_documents?.filter(doc => doc.status === STATUS_MAP['Brouillon']).length ?? 0 },
+    { label: 'Soumis', count: dashboardData?.my_documents?.filter(doc => doc.status === STATUS_MAP['Soumis']).length ?? 0 },
+    { label: 'En analyse', count: dashboardData?.my_documents?.filter(doc => doc.status === STATUS_MAP['En analyse']).length ?? 0 },
+    { label: 'Gagné', count: dashboardData?.my_documents?.filter(doc => doc.status === STATUS_MAP['Gagné']).length ?? 0 },
+    { label: 'Perdu', count: dashboardData?.my_documents?.filter(doc => doc.status === STATUS_MAP['Perdu']).length ?? 0 },
   ]
+
+  const getFilterStatusValue = (label: string): StatusType | null => {
+    return STATUS_MAP[label] || null
+  }
 
   if (error) {
     return (
       <>
-        <Topbar userName={dashboardData?.user?.full_name || 'User'} notificationCount={unreadNotifications} />
+        <Topbar userName={dashboardData?.user?.full_name || 'User'} notificationCount={unreadNotifications} onSubmitClick={() => router.push('/dashboard/tenders')} />
         <main className="flex-1 overflow-y-auto p-8">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
             <p className="font-semibold">Erreur</p>
@@ -332,7 +332,7 @@ export default function UserPage(): React.ReactElement {
 
   return (
     <>
-      <Topbar userName={dashboardData?.user?.full_name || 'User'} notificationCount={unreadNotifications} />
+      <Topbar userName={dashboardData?.user?.full_name || 'User'} notificationCount={unreadNotifications} onSubmitClick={() => router.push('/dashboard/tenders')} />
 
       <main className="flex-1 overflow-y-auto p-[24px_28px_48px]">
         {loading && (
@@ -382,38 +382,55 @@ export default function UserPage(): React.ReactElement {
                 ))}
               </div>
 
-              <button className="flex items-center gap-[5px] bg-white border border-[#E5E0D8] rounded-lg px-[10px] py-[5px] text-xs text-[#6B6560] cursor-pointer hover:bg-[#F5F3EE] transition">
+              <button 
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                className="flex items-center gap-[5px] bg-white border border-[#E5E0D8] rounded-lg px-[10px] py-[5px] text-xs text-[#6B6560] cursor-pointer hover:bg-[#F5F3EE] transition"
+              >
                 <SlidersHorizontal size={14} />
-                Échéance (proche → loin)
+                {sortOrder === 'asc' ? 'Échéance (proche → loin)' : 'Échéance (loin → proche)'}
                 <ChevronDown size={14} />
               </button>
             </div>
 
             {dashboardData.my_documents && dashboardData.my_documents.length > 0 ? (
               <div className="grid grid-cols-3 gap-4">
-                {dashboardData.my_documents.map((doc: DocumentResponse) => {
-                  const metadata = doc.document_metadata || {}
-                  const ao: AOItem = {
-                    id: parseInt(doc.id) || 0,
-                    sector: (metadata.sector as string) || 'Autres',
-                    title: doc.filename || 'Sans titre',
-                    client: (metadata.client as string) || 'N/A',
-                    status: (doc.status as StatusType) || 'brouillon',
-                    statusLabel: (metadata.status_label as string) || 'Brouillon',
-                    conformite: (metadata.compliance_score as number) || 0,
-                    conformiteColor: (metadata.compliance_score as number) ? ((metadata.compliance_score as number) >= 80 ? 'success' : (metadata.compliance_score as number) >= 60 ? 'amber' : 'danger') : 'neutral',
-                    meta: [
-                      { val: metadata.deadline ? `J−${Math.max(0, Math.ceil((new Date(metadata.deadline as string).getTime() - Date.now()) / 86400000))}` : 'N/A', label: 'Échéance', color: 'danger' },
-                      { val: String((metadata.document_count as number) || 0), label: 'Documents', color: 'default' },
-                      { val: metadata.budget_eur ? `€${Math.round((metadata.budget_eur as number) / 1000)}K` : 'N/A', label: 'Budget', color: 'default' },
-                    ],
-                    footerLeft: doc.created_at ? `Créé le ${new Date(doc.created_at).toLocaleDateString('fr-FR')}` : undefined,
-                    actionLabel: 'Voir le dossier',
-                    actionVariant: 'primary',
-                    borderColor: '#378ADD',
-                  }
-                  return <AOCard key={doc.id} ao={ao} />
-                })}
+                {(() => {
+                  const filteredAndSorted = dashboardData.my_documents
+                    .filter((doc: DocumentResponse) => {
+                      if (activeFilter === 'Tous') return true
+                      const targetStatus = getFilterStatusValue(activeFilter)
+                      return doc.status === targetStatus
+                    })
+                    .sort((a: DocumentResponse, b: DocumentResponse) => {
+                      const metaA = a.document_metadata || {}
+                      const metaB = b.document_metadata || {}
+                      const deadlineA = metaA.deadline ? new Date(metaA.deadline as string).getTime() : Infinity
+                      const deadlineB = metaB.deadline ? new Date(metaB.deadline as string).getTime() : Infinity
+                      return sortOrder === 'asc' ? deadlineA - deadlineB : deadlineB - deadlineA
+                    })
+
+                  return filteredAndSorted.map((doc: DocumentResponse) => {
+                    const metadata = doc.document_metadata || {}
+                    const ao: AOItem = {
+                      id: parseInt(doc.id) || 0,
+                      sector: (metadata.sector as string) || 'Autres',
+                      title: doc.filename || 'Sans titre',
+                      client: (metadata.client as string) || 'N/A',
+                      status: (doc.status as StatusType) || 'uploaded',
+                      statusLabel: (metadata.status_label as string) || 'Brouillon',
+                      conformite: (metadata.compliance_score as number) || 0,
+                      conformiteColor: (metadata.compliance_score as number) ? ((metadata.compliance_score as number) >= 80 ? 'success' : (metadata.compliance_score as number) >= 60 ? 'amber' : 'danger') : 'neutral',
+                      meta: [
+                        { val: metadata.deadline ? `J−${Math.max(0, Math.ceil((new Date(metadata.deadline as string).getTime() - Date.now()) / 86400000))}` : 'N/A', label: 'Échéance', color: 'danger' },
+                        { val: String((metadata.document_count as number) || 0), label: 'Documents', color: 'default' },
+                        { val: metadata.budget_eur ? `€${Math.round((metadata.budget_eur as number) / 1000)}K` : 'N/A', label: 'Budget', color: 'default' },
+                      ],
+                      footerLeft: doc.created_at ? `Créé le ${new Date(doc.created_at).toLocaleDateString('fr-FR')}` : undefined,
+                      borderColor: '#378ADD',
+                    }
+                    return <AOCard key={doc.id} ao={ao} />
+                  })
+                })()}
               </div>
             ) : (
               <div className="bg-white rounded-lg p-12 text-center border border-[#E5E0D8]">

@@ -20,6 +20,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Smartphone,
+  ClipboardCheck,
+  Database,
 } from 'lucide-react'
 
 const ACTION_LABELS: Record<string, string> = {
@@ -64,7 +67,11 @@ const RESOURCE_META: Record<string, { icon: React.ReactNode; label: string; bgCo
   tenant: { icon: <Building2 className="w-3 h-3" />, label: 'tenant', bgColor: 'bg-amber-100' },
   role: { icon: <Shield className="w-3 h-3" />, label: 'role', bgColor: 'bg-pink-100' },
   api_key: { icon: <Zap className="w-3 h-3" />, label: 'api key', bgColor: 'bg-gray-100' },
-  analysis: { icon: <BarChart3 className="w-3 h-3" />, label: 'analysis', bgColor: 'bg-emerald-100' },
+  auth_session: { icon: <Shield className="w-3 h-3" />, label: 'session', bgColor: 'bg-green-100' },
+  totp_device: { icon: <Smartphone className="w-3 h-3" />, label: '2FA device', bgColor: 'bg-yellow-100' },
+  compliance_report: { icon: <ClipboardCheck className="w-3 h-3" />, label: 'compliance', bgColor: 'bg-indigo-100' },
+  chunk: { icon: <Database className="w-3 h-3" />, label: 'chunk', bgColor: 'bg-slate-100' },
+  '2fa': { icon: <Smartphone className="w-3 h-3" />, label: '2FA', bgColor: 'bg-yellow-100' },
 }
 
 const ACTION_BADGE_CLASS: Record<string, string> = {

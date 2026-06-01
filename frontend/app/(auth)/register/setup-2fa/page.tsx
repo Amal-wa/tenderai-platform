@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, AlertCircle, Copy, Download, CheckCircle } from 'lucide-react'
 import AuthLeftPanel from '@/components/auth/AuthLeftPanel'
-import api, { extractErrorMessage } from '@/lib/api'
+import api, { extractErrorMessage, logout } from '@/lib/api'
 import type { TOTPSetupResponse, TOTPVerifyResponse } from '@/types/auth'
 
 type Step = 'verify' | 'backup'
@@ -95,17 +95,14 @@ export default function Setup2FAPage(): JSX.Element {
 
   const handleFinish = async () => {
     try {
-      const me = await api.get('/api/v1/auth/me')
-      const role = !me.data.role ? 'viewer'
-        : typeof me.data.role === 'string' ? me.data.role
-        : me.data.role.name ?? 'viewer'
-      if (['superadmin', 'admin'].includes(role)) {
-        router.push('/dashboard/admin')
-      } else {
-        router.push('/dashboard/user')
-      }
-    } catch {
-      router.push('/login')
+      await logout()
+      sessionStorage.clear()
+      router.push('/login?message=account_ready')
+    } catch (err: unknown) {
+      const errorMessage = extractErrorMessage(err)
+      console.error('Logout failed during 2FA completion:', errorMessage)
+      sessionStorage.clear()
+      router.push('/login?message=account_ready')
     }
   }
 

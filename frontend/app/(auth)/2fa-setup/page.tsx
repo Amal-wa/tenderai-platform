@@ -56,10 +56,10 @@ function TwoFASetupInner(): JSX.Element {
       try {
         setIsLoading(true)
         setError(null)
-        // Call API endpoint to get QR code + secret
         const response = await totpSetup()
         setQrCodeUrl(response.qr_code)
         setSecret(response.secret)
+        setBackupCodes(response.backup_codes)
       } catch (err) {
         const msg = extractErrorMessage(err)
         setError(msg || 'Impossible de charger le code QR. Veuillez réessayer.')
@@ -79,10 +79,7 @@ function TwoFASetupInner(): JSX.Element {
     try {
       setCodeError(null)
       setIsLoading(true)
-      // Call API to verify TOTP code and get backup codes
-      // Add Idempotency-Key header for retry safety
-      const response = await totpVerify(code)
-      setBackupCodes(response.backup_codes || [])
+      await totpVerify(code)
       setCurrentStep('backup')
       setCode('')
     } catch (err) {
@@ -111,25 +108,15 @@ function TwoFASetupInner(): JSX.Element {
   // Get org name from AuthContext for dynamic messages
   const orgName = user?.tenant_name || 'votre organisation'
 
-  const handleFinish = async () => {
-    try {
-      setIsLoading(true)
-      // Get redirect destination from ?next= parameter
-      // Validate it to prevent open redirect vulnerability
-      const nextParam = searchParams.get('next')
-      let redirectPath = '/dashboard'
-      
-      // Only allow relative paths that start with /dashboard or /login
-      if (nextParam && (nextParam.startsWith('/dashboard') || nextParam.startsWith('/login'))) {
-        redirectPath = nextParam
-      }
-      
-      router.push(redirectPath)
-    } catch (err) {
-      const msg = extractErrorMessage(err)
-      setError(msg || 'Erreur lors de la finalisation. Veuillez réessayer.')
-      setIsLoading(false)
+  const handleFinish = () => {
+    const nextParam = searchParams.get('next')
+    let redirectPath = '/dashboard'
+    
+    if (nextParam && (nextParam.startsWith('/dashboard') || nextParam.startsWith('/login'))) {
+      redirectPath = nextParam
     }
+    
+    router.push(redirectPath)
   }
 
   return (
@@ -146,7 +133,7 @@ function TwoFASetupInner(): JSX.Element {
           '10 codes de secours générés à l\'activation',
           'Révocation instantanée de session possible',
         ]}
-        footerNote="🔒 Vos données ne quittent jamais vos serveurs"
+        footerNote="Vos données ne quittent jamais vos serveurs"
       />
 
       {/* RIGHT PANEL — 60% Cream */}

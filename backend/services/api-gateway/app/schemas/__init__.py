@@ -50,6 +50,7 @@ LoginAttemptResponse = _schemas_module.LoginAttemptResponse
 RefreshRequest = _schemas_module.RefreshRequest
 NotificationResponse = _schemas_module.NotificationResponse
 KPIData = _schemas_module.KPIData
+LastAnalysisItem = _schemas_module.LastAnalysisItem
 TeamActivityItem = _schemas_module.TeamActivityItem
 StatusDistribution = _schemas_module.StatusDistribution
 AuditLogResponse = _schemas_module.AuditLogResponse
@@ -84,7 +85,7 @@ __all__ = [
     "TokenResponse", "AuthSessionResponse", "LoginAttemptResponse",
     "RefreshRequest",
     "NotificationResponse",
-    "KPIData", "TeamActivityItem", "StatusDistribution",
+    "KPIData", "LastAnalysisItem", "TeamActivityItem", "StatusDistribution",
     "AuditLogResponse",
     "ErrorResponse", "PaginatedResponse", "DashboardResponse",
     "RegisterRequest", "RegisterResponse",

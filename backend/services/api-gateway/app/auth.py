@@ -523,7 +523,8 @@ async def get_current_user(
 
         # On n'accepte QUE les access tokens pour accéder aux ressources.
         # Les refresh tokens ne servent qu'à /auth/refresh.
-        if token_type != "access":
+        # Les partial tokens (2FA setup) sont aussi acceptés pour l'authentification initiale.
+        if token_type not in ("access", "partial"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Utilisez votre access token (pas le refresh token).",

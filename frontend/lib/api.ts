@@ -351,8 +351,6 @@ export async function resendPasswordReset(email: string): Promise<void> {
 }
 
 export async function totpSetup(): Promise<TOTPSetupResponse> {
-  // POST /api/v1/auth/2fa/setup
-  // Initialize 2FA setup: returns QR code, secret, and backup codes
   const { data } = await api.post<TOTPSetupResponse>('/api/v1/auth/2fa/setup')
   return data
 }
@@ -452,6 +450,12 @@ export async function deleteUser(id: string): Promise<void> {
   const tenantId = getTenantIdFromToken()
   if (!tenantId) throw new Error('Tenant ID not found in token')
   await api.delete(`/api/v1/${tenantId}/users/${id}`)
+}
+
+export async function deleteMember(userId: string): Promise<void> {
+  const tenantId = getTenantIdFromToken()
+  if (!tenantId) throw new Error('Tenant ID not found in token')
+  await api.delete(`/api/v1/${tenantId}/users/${userId}`)
 }
 
 // =============================================================================

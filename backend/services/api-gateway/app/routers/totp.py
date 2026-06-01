@@ -113,20 +113,21 @@ async def setup_2fa(
             detail="Encryption key not configured",
         )
     
-    # Check if 2FA already enabled
-    existing = db.query(UserTOTP).filter(
-        UserTOTP.user_id == current_user.id,
-        UserTOTP.is_enabled,
+    totp_record = db.query(UserTOTP).filter(
+        UserTOTP.user_id == current_user.id
     ).first()
     
-    if existing:
-        logger.warning(f"User {current_user.id} attempted to set up 2FA but it's already enabled")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="2FA is already enabled for this account",
-        )
+    if totp_record:
+        if totp_record.is_enabled and totp_record.verified_at:
+            logger.warning(f"User {current_user.id} attempted to set up 2FA but it's already enabled")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="2FA is already enabled for this account",
+            )
+        logger.info(f"Deleting previous 2FA setup for user {current_user.id}")
+        db.delete(totp_record)
+        db.commit()
     
-    # Generate new secret
     secret = generate_totp_secret()
     
     log_action(
@@ -138,21 +139,10 @@ async def setup_2fa(
         resource_id=current_user.id,
         status="success",
         reason="2FA setup initiated",
-        ip_address=get_client_ip(http_request),
-        user_agent=http_request.headers.get("user-agent") if http_request else None,
+        ip_address=get_client_ip(request),
+        user_agent=request.headers.get("user-agent") if request else None,
     )
     db.commit()
-    
-    # Check if uncommitted setup exists (replace it)
-    totp_record = db.query(UserTOTP).filter(
-        UserTOTP.user_id == current_user.id
-    ).first()
-    
-    if totp_record:
-        # Delete old uncommitted setup
-        logger.info(f"Deleting previous uncommitted 2FA setup for user {current_user.id}")
-        db.delete(totp_record)
-        db.commit()
     
     # Generate backup codes
     plaintext_codes = generate_backup_codes(10)

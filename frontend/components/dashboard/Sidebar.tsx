@@ -81,16 +81,19 @@ export default function Sidebar(): React.ReactElement {
     <aside className="w-60 bg-[var(--navy)] min-h-screen flex flex-col sticky top-0 h-screen">
       {/* Logo */}
       <div className="p-4 border-b border-white/[0.06]">
-        <div className="flex items-center gap-3 mb-3">
+        <div className="flex flex-col items-center gap-3 mb-3">
           {tenant?.logo_url ? (
             <img
               src={tenant.logo_url}
               alt={tenant.name}
-              className="h-12 w-auto max-w-[160px] object-contain rounded-lg flex-shrink-0"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none'
+              }}
+              className="h-24 w-auto max-w-[160px] object-contain rounded-lg flex-shrink-0"
             />
           ) : (
-            <div className="w-9 h-9 bg-[var(--amber)] rounded-xl flex items-center justify-center flex-shrink-0">
-              <span className="font-heading text-xs font-black text-white">
+            <div className="w-20 h-20 bg-[var(--amber)] rounded-xl flex items-center justify-center flex-shrink-0">
+              <span className="font-heading text-lg font-black text-white">
                 {tenant?.name
                   ? tenant.name
                     .trim()
@@ -104,6 +107,7 @@ export default function Sidebar(): React.ReactElement {
               </span>
             </div>
           )}
+          <p className="text-xs font-medium text-white/70 text-center">{tenant?.name}</p>
         </div>
       </div>
 

@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Users, Plus } from 'lucide-react'
-import { extractErrorMessage } from '@/lib/api'
+import { Users, Plus, Trash2, Loader2 } from 'lucide-react'
+import { extractErrorMessage, deleteMember } from '@/lib/api'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 import InviteMemberModal from '@/components/team/InviteMemberModal'
 
@@ -22,7 +22,24 @@ export default function TeamPage(): JSX.Element {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-   useEffect(() => {
+  const [isDeleting, setIsDeleting] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<TeamMember | null>(null)
+
+  const getRoleName = (role: any): string => {
+    if (!role) return ''
+    if (typeof role === 'string') return role
+    if (role && typeof role === 'object' && role.name) return role.name
+    return ''
+  }
+
+  const roleName = getRoleName(user?.role)
+  const isSuperAdmin = roleName === 'superadmin'
+
+  const canDeleteMember = (memberId: string): boolean =>
+    isSuperAdmin && memberId !== user?.id
+ 
+  useEffect(() => {
     if (user?.tenant_id && isAdmin) {
       fetchMembers()
     }
@@ -143,6 +160,20 @@ export default function TeamPage(): JSX.Element {
     fetchMembers()
   }
 
+  const handleDelete = async (memberId: string): Promise<void> => {
+    try {
+      setIsDeleting(memberId)
+      setDeleteError(null)
+      setConfirmTarget(null)
+      await deleteMember(memberId)
+      setMembers(prev => prev.filter(m => m.id !== memberId))
+    } catch (err) {
+      setDeleteError(extractErrorMessage(err))
+    } finally {
+      setIsDeleting(null)
+    }
+  }
+
   return (
     <div className="flex-1 space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -181,6 +212,12 @@ export default function TeamPage(): JSX.Element {
           >
             Réessayer
           </button>
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {deleteError}
         </div>
       )}
 
@@ -226,6 +263,11 @@ export default function TeamPage(): JSX.Element {
                 <th className="px-6 py-3 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary, #6B6560)' }}>
                   Dernière connexion
                 </th>
+                {isSuperAdmin && (
+                  <th className="px-6 py-3 text-left text-xs font-semibold" style={{ color: 'var(--color-text-secondary, #6B6560)' }}>
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -269,6 +311,23 @@ export default function TeamPage(): JSX.Element {
                   <td className="px-6 py-4 text-sm text-gray-600">
                     {member.last_login_at ? new Date(member.last_login_at).toLocaleDateString('fr-FR') : 'Jamais'}
                   </td>
+                  {isSuperAdmin && (
+                    <td className="px-6 py-4 text-sm">
+                      {canDeleteMember(member.id) && (
+                        <button
+                          onClick={() => setConfirmTarget(member)}
+                          disabled={isDeleting === member.id}
+                          className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                          aria-label={`Supprimer ${member.full_name}`}
+                        >
+                          {isDeleting === member.id
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <Trash2 className="w-4 h-4" />
+                          }
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -282,6 +341,36 @@ export default function TeamPage(): JSX.Element {
         onClose={() => setIsModalOpen(false)}
         onSuccess={handleInviteSuccess}
       />
+
+      {/* Delete Member Confirmation Modal */}
+      {confirmTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full shadow-xl border border-gray-200 mx-4">
+            <h3 className="text-base font-semibold text-navy mb-2" style={{ color: 'var(--navy, #0F1C35)' }}>
+              Supprimer {confirmTarget.full_name} ?
+            </h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Cette action est irréversible. Le membre perdra immédiatement l'accès à l'organisation.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmTarget(null)}
+                className="px-4 py-2 text-sm font-medium text-navy border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                style={{ color: 'var(--navy, #0F1C35)', borderColor: 'var(--navy, #0F1C35)' }}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => handleDelete(confirmTarget.id)}
+                disabled={isDeleting === confirmTarget.id}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

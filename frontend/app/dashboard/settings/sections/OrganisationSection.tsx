@@ -151,6 +151,7 @@ export default function OrganisationSection({
     try {
       const res = await uploadTenantLogo(file)
       setPreview(res.data.logo_url)
+      window.dispatchEvent(new Event('tenant-logo-updated'))
       setUploadFeedback({ type: 'success', msg: 'Logo mis à jour' })
     } catch (err) {
       setUploadFeedback({ type: 'error', msg: extractErrorMessage(err) })
@@ -222,7 +223,15 @@ export default function OrganisationSection({
 
         {preview ? (
           <div className="flex items-center gap-4">
-            <img src={preview} alt="Logo" className="h-20 w-20 object-contain border rounded" style={cardBorder} />
+            <img 
+              src={preview} 
+              alt="Logo" 
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none'
+              }}
+              className="h-20 w-20 object-contain border rounded" 
+              style={cardBorder} 
+            />
             <div className="flex gap-2">
               <button onClick={() => fileRef.current?.click()} disabled={uploading}
                 className="px-3 py-1 text-xs font-medium rounded border"
